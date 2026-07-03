@@ -1,9 +1,0 @@
-Upstream Curio schema files (schemas/frontmatter.v1.json,
-schemas/events.v1.json) did not exist at scaffold time — they are
-generated from curio-types in a later upstream phase.
-
-A later integration pass must:
-  1. copy both schema files here, byte-identical;
-  2. write the PIN file per README.md (source repo, upstream commit,
-     sync timestamp, sha256 of each vendored file);
-  3. delete this marker.

@@ -1,0 +1,5 @@
+source_repo: curio-rss
+commit: a295cc1a9cddab49cbe1094820fbe6764fcac2ca
+synced: 2026-07-03T14:09:20Z
+sha256 frontmatter.v1.json: c2c500d0ff256440a79c84adfcd9a3bb2dc7c764e891553761b64dc805bb7c6e
+sha256 events.v1.json: 43c84ab7a9cfbf70ff5ff16fddc48dcf4a539be83e365a9595855c95158ecffa

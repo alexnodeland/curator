@@ -39,8 +39,7 @@ Rules:
 
 ## Current status
 
-Curio has not yet published its machine-readable schema files (they are
-generated from `curio-types` in a later upstream phase; the human-readable
-contract document is authoritative until then). The
-[`TODO.sync-pending`](TODO.sync-pending) marker tracks this — a later
-integration pass copies the schemas and writes the first `PIN`.
+Synced. Both schema files are vendored byte-identical from the upstream
+Curio repo; [`PIN`](PIN) records the upstream commit and the sha256 of
+each vendored file. The Curio adapter in `kp-ingest` embeds these copies
+at compile time (`include_str!`) — the vendored bytes ARE the boundary.
