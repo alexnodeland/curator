@@ -32,6 +32,11 @@ kp-librarian = { path = "crates/kp-librarian" }
 # Shared third-party deps.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Boundary validation of producer documents against the VENDORED schemas
+# (contracts/vendor/). default-features = false strips the http/file
+# reference resolvers: every schema is embedded at compile time and
+# self-contained, and a remote $ref must be a hard error, never a fetch.
+jsonschema = { version = "0.46", default-features = false }
 # serde_yaml is archived upstream but remains the stable, ubiquitous serde
 # YAML impl; kp-note/v1 frontmatter is flat YAML well inside its supported
 # surface. Revisit if a maintained successor standardizes.

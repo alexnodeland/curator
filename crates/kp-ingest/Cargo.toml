@@ -7,11 +7,17 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+jsonschema = { workspace = true }
 kp-core = { workspace = true }
 kp-index = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
