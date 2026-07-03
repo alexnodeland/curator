@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knowledge-plane.invalid/contracts/kp-note/v1.schema.json",
+  "$comment": "$id domain is a placeholder until the project-identity decision lands. This schema validates the kp-note/v1 frontmatter block (the YAML mapping, represented as JSON).",
+  "title": "kp-note/v1 frontmatter",
+  "type": "object",
+  "required": ["kp_id", "kp_schema", "title"],
+  "properties": {
+    "kp_id": {
+      "description": "Producer-namespaced identity. Minted, never derived from content or location.",
+      "type": "string",
+      "pattern": "^(curio:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|zotero:[A-Z0-9]{8}|kp:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|path:.+)$"
+    },
+    "kp_schema": {
+      "description": "Contract version pin.",
+      "const": "kp-note/v1"
+    },
+    "checksum": {
+      "description": "Change token ONLY — never identity. sha256 over note content, lowercase hex.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created": {
+      "description": "RFC 3339 UTC timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated": {
+      "description": "RFC 3339 UTC timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source": {
+      "description": "Origin URL; null for born-in-vault notes.",
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "status": false
+  },
+  "$defs": {},
+  "additionalProperties": true
+}

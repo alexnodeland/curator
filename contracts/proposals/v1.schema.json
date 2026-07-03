@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knowledge-plane.invalid/contracts/proposals/v1.schema.json",
+  "$comment": "$id domain is a placeholder until the project-identity decision lands. This schema validates proposal.json. Path-safety rules beyond shape (no .curio/**, no traversal, vault boundary) are enforced by the validator, not expressible here.",
+  "title": "proposals/v1 proposal.json",
+  "type": "object",
+  "required": ["schema", "id", "created", "author", "title", "rationale", "status", "files"],
+  "properties": {
+    "schema": {
+      "const": "proposals/v1"
+    },
+    "id": {
+      "description": "ULID — also the proposal directory name.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "created": {
+      "description": "RFC 3339 UTC timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "author": {
+      "description": "kp-librarian or an agent-supplied name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "status": {
+      "enum": ["open", "applied", "rejected"]
+    },
+    "files": {
+      "description": "Vault-relative paths touched by changes.patch.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^/]"
+      }
+    }
+  },
+  "additionalProperties": true
+}
