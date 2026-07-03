@@ -22,10 +22,12 @@
 //! path (`docs/design/enhancer.md`) — enabling it changes prose quality,
 //! never artifact shape. The system is fully functional without it.
 
+pub mod digest;
 pub mod patch;
 pub mod proposals;
 pub mod uuid7;
 
+pub use digest::{DigestError, DigestReport, run_digest};
 pub use patch::{FilePatch, Hunk, HunkLine, PatchError, apply_file_patch, parse_patch};
 pub use proposals::{ApplyError, ApplyReport, apply_proposal, auto_applicable, render_review};
 pub use uuid7::{is_uuid7, mint_uuid7};
