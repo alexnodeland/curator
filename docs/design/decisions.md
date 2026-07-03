@@ -76,6 +76,18 @@ model downloads, no external services. Remote OpenAI-compatible endpoints remain
 documented post-v1 upgrade seam. The quickstart states one measured wall-clock number,
 prerequisites included.
 
+**Build reality check (2026-07-03).** The rule for the cargo wiring was: try
+`embed-onnx` (fastembed + ort, pinned `BGE-small-en-v1.5`, 384 dims) as a DEFAULT
+feature of `kp-index`, and demote it to opt-in only if it failed to build cleanly on
+Apple Silicon — the quickstart must never lie about what a default build delivers.
+It built and linked cleanly (ort 2.0.0-rc.12, downloaded CPU binaries), so **the
+default stands**: a stock `cargo build` includes the `builtin` embedder, matching the
+`embedder = "builtin"` default in kp-config/v1. Model *fetch* stays lazy — first
+`embed()` call, never construction — so the default `cargo test --workspace` remains
+fully hermetic; the one end-to-end inference test is `#[ignore]`d and run manually.
+`--no-default-features` yields a hash-embedder-only build for constrained
+environments.
+
 ## 5. The librarian is deterministic-first; the LLM is an optional enhancer
 
 **Killed:** an agent-harness-dependent discovery loop — where the headline feature (the

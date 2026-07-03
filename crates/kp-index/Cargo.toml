@@ -14,6 +14,19 @@ sqlite-vec = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+# The pinned in-process CPU ONNX embedder (`builtin`), on by default —
+# verified to build and link cleanly on Apple Silicon (see
+# docs/design/decisions.md §4). Model fetch is lazy, so the DEFAULT test
+# suite stays hermetic; `--no-default-features` gives a hash-only build.
+fastembed = { version = "5.17", optional = true, default-features = false, features = [
+    "ort-download-binaries-native-tls",
+    "hf-hub-native-tls",
+] }
+
+[features]
+default = ["embed-onnx"]
+embed-onnx = ["dep:fastembed"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 

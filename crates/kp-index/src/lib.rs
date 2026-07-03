@@ -9,6 +9,8 @@
 pub mod chunk;
 pub mod db;
 pub mod embed;
+#[cfg(feature = "embed-onnx")]
+pub mod embed_onnx;
 pub mod epoch;
 pub mod error;
 pub mod search;
@@ -16,6 +18,8 @@ pub mod search;
 pub use chunk::{Chunk, ChunkParams, chunk_text};
 pub use db::{Index, IndexMeta, IndexReader, SCHEMA_VERSION};
 pub use embed::{Embedder, HashEmbedder};
+#[cfg(feature = "embed-onnx")]
+pub use embed_onnx::FastEmbedder;
 pub use epoch::{EpochReport, build_epoch};
 pub use error::IndexError;
 pub use search::SearchHit;
