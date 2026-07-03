@@ -236,26 +236,20 @@ impl Index {
 
         let kp_id = note.kp_id().to_string();
         let title = note.title();
-        let (tags_json, source, created, updated, checksum) = match &note.frontmatter {
+        // The stored change token covers the WHOLE note (frontmatter +
+        // body), never the producer-declared frontmatter checksum: a
+        // declared checksum covers only what the producer stamps (e.g. a
+        // managed region), and keying change detection on it would make
+        // user edits outside that region invisible to re-indexing.
+        let checksum = Some(note.change_token().to_string());
+        let (tags_json, source, created, updated) = match &note.frontmatter {
             Frontmatter::Kp(fm) => (
                 serde_json::to_string(&fm.tags).expect("string vec serializes"),
                 fm.source.clone(),
                 fm.created.clone(),
                 fm.updated.clone(),
-                Some(
-                    fm.checksum
-                        .clone()
-                        .unwrap_or_else(|| note.body_checksum())
-                        .to_string(),
-                ),
             ),
-            Frontmatter::None | Frontmatter::Foreign(_) => (
-                "[]".to_owned(),
-                None,
-                None,
-                None,
-                Some(note.body_checksum().to_string()),
-            ),
+            Frontmatter::None | Frontmatter::Foreign(_) => ("[]".to_owned(), None, None, None),
         };
 
         let tx = self.conn.transaction()?;

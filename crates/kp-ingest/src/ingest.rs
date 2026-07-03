@@ -6,16 +6,18 @@
 //! adapter (Curio never needs to know kp-note exists); everything else is
 //! `path:<relpath>`.
 //!
-//! Change detection is by checksum against the indexed `notes.checksum`:
-//! Curio notes use their DECLARED checksum (covers the managed region),
-//! everything else the sha256 of the body. An unchanged (checksum, path)
-//! pair skips the expensive path entirely — no chunking, no embedding,
-//! no writes. All changed chunks of a run go through ONE
+//! Change detection is by the FULL-note change token (`Note::change_token`
+//! — canonical frontmatter + whole body) against the indexed
+//! `notes.checksum`. Producer-declared frontmatter checksums are metadata
+//! only: they cover just the producer's managed region, so keying change
+//! detection on them would make user edits outside that region (companion
+//! notes, wikilinks, tags) invisible to re-indexing. An unchanged
+//! (token, path) pair skips the expensive path entirely — no chunking, no
+//! embedding, no writes. All changed chunks of a run go through ONE
 //! `Embedder::embed` call (batch-first trait).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use kp_core::note::Frontmatter;
 use kp_core::{Checksum, KpConfig, Note, Vault};
 use kp_index::{Chunk, ChunkParams, Embedder, EpochSource, Index, build_epoch_from};
 
@@ -86,13 +88,10 @@ fn prepare_corpus(vault: &Vault, adapter: &CurioAdapter) -> Result<Corpus, Inges
     for walked in walk.notes {
         corpus.scanned += 1;
         corpus.eligible_paths.insert(walked.rel_path.clone());
-        let p = match adapter.adapt(&walked.note) {
+        let note = match adapter.adapt(&walked.note) {
             CurioAdapt::Adapted(adapted) => {
                 corpus.curio_notes += 1;
-                Prepared {
-                    checksum: adapted.frontmatter.checksum.clone(),
-                    note: adapted.kp_note,
-                }
+                adapted.kp_note
             }
             CurioAdapt::Invalid { path, warnings } => {
                 for warning in &warnings {
@@ -101,21 +100,16 @@ fn prepare_corpus(vault: &Vault, adapter: &CurioAdapter) -> Result<Corpus, Inges
                 corpus.skipped += 1;
                 continue;
             }
-            CurioAdapt::NotCurio => {
-                let checksum = match &walked.note.frontmatter {
-                    // Producer-declared change token wins when present;
-                    // mirrors what upsert_note stores in notes.checksum.
-                    Frontmatter::Kp(fm) => fm
-                        .checksum
-                        .clone()
-                        .unwrap_or_else(|| walked.note.body_checksum()),
-                    _ => walked.note.body_checksum(),
-                };
-                Prepared {
-                    note: walked.note,
-                    checksum,
-                }
-            }
+            CurioAdapt::NotCurio => walked.note,
+        };
+        // The change token covers the WHOLE (possibly adapted) note —
+        // mirrors what upsert_note_prechunked stores in notes.checksum.
+        // Producer-declared frontmatter checksums are metadata, not the
+        // token: they cover only the managed region, and user enrichment
+        // outside it must still re-index.
+        let p = Prepared {
+            checksum: note.change_token(),
+            note,
         };
         // Two files claiming one identity is a producer bug; first
         // (path-sorted) file wins deterministically, the rest warn.

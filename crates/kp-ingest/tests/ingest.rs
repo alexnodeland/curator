@@ -100,10 +100,12 @@ fn full_pipeline_over_the_fixture_vault() {
         .expect("query")
         .expect("curio note indexed under its adapted identity");
     assert_eq!(curio_state.path, "curio/rust-async-patterns.md");
-    assert_eq!(
-        curio_state.checksum.as_deref(),
-        Some("sha256:4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5"),
-        "curio notes are change-detected by their DECLARED checksum"
+    let token = curio_state.checksum.as_deref().expect("token recorded");
+    assert!(token.starts_with("sha256:"), "{token}");
+    assert_ne!(
+        token, "sha256:4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+        "change detection keys on the FULL note token, never the \
+         producer-declared managed-region checksum"
     );
     assert!(
         index.note_state(RUST_NOTES_KP_ID).expect("query").is_some(),
@@ -228,6 +230,102 @@ fn rebuild_reproduces_the_ingest_corpus() {
     assert_eq!(
         index.links_from(CURIO_KP_ID).expect("query"),
         vec![(RUST_NOTES_KP_ID.to_owned(), "wikilink".to_owned())]
+    );
+}
+
+/// Recursive fixture copy so a test can MUTATE its vault (the checked-in
+/// fixture tree stays read-only).
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).expect("mkdir");
+    for entry in std::fs::read_dir(from).expect("readdir") {
+        let entry = entry.expect("entry");
+        let dest = to.join(entry.file_name());
+        if entry.file_type().expect("type").is_dir() {
+            copy_dir(&entry.path(), &dest);
+        } else {
+            std::fs::copy(entry.path(), &dest).expect("copy");
+        }
+    }
+}
+
+/// Regression (change-token bug): user enrichment OUTSIDE the Curio
+/// managed region does not move the producer-declared checksum, but it
+/// MUST still re-index — search, related() and the link graph all read
+/// the whole note.
+#[test]
+fn user_edits_outside_the_managed_region_reindex() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vault_root = dir.path().join("vault");
+    copy_dir(
+        &fixture("fixtures/vault"),
+        &vault_root, // mutable copy
+    );
+    let index_path = dir.path().join("index.db");
+    let toml = format!(
+        "schema = \"kp-config/v1\"\n[vault]\npath = \"{}\"\n[index]\npath = \"{}\"\nembedder = \"hash\"\n",
+        vault_root.display(),
+        index_path.display(),
+    );
+    let cfg = KpConfig::from_toml_str(&toml).expect("parses");
+    ingest(&cfg, &CountingEmbedder::new()).expect("first ingest");
+
+    // Enrich BELOW the managed region: the declared frontmatter checksum
+    // (managed-region bytes only) is untouched.
+    let note_path = vault_root.join("curio/rust-async-patterns.md");
+    let original = std::fs::read_to_string(&note_path).expect("read");
+    std::fs::write(
+        &note_path,
+        format!("{original}\nAlso see [[guides/chunking|the chunking guide]].\n"),
+    )
+    .expect("append");
+
+    let embedder = CountingEmbedder::new();
+    let report = ingest(&cfg, &embedder).expect("second ingest");
+    assert_eq!(
+        report.ingested, 1,
+        "the enriched note must re-index even though the declared checksum is unchanged"
+    );
+    assert_eq!(
+        embedder.calls.load(Ordering::SeqCst),
+        1,
+        "the enriched note re-embeds"
+    );
+
+    // The new companion wikilink is visible to the link graph.
+    let probe = HashEmbedder::new(64);
+    let index = Index::open(&index_path, &probe).expect("open");
+    let links = index.links_from(CURIO_KP_ID).expect("query");
+    assert!(
+        links.iter().any(|(to, _)| to == "path:guides/chunking.md"),
+        "companion wikilink must be recorded, got {links:?}"
+    );
+    index.close().expect("close");
+
+    // Same class of hole for kp-frontmatter notes carrying a stale
+    // producer-declared checksum (the Zotero shape): body edits that do
+    // not touch the declared value must still re-index.
+    let zotero_like = vault_root.join("notes/stale-checksum.md");
+    let declared = "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    std::fs::write(
+        &zotero_like,
+        format!(
+            "---\nkp_id: \"zotero:KEYSTALE\"\nkp_schema: kp-note/v1\ntitle: S\nchecksum: \"{declared}\"\n---\nmanaged text\n"
+        ),
+    )
+    .expect("write");
+    let report = ingest(&cfg, &CountingEmbedder::new()).expect("ingest new note");
+    assert_eq!(report.ingested, 1);
+    std::fs::write(
+        &zotero_like,
+        format!(
+            "---\nkp_id: \"zotero:KEYSTALE\"\nkp_schema: kp-note/v1\ntitle: S\nchecksum: \"{declared}\"\n---\nmanaged text\n\nmy margin notes\n"
+        ),
+    )
+    .expect("edit body, checksum untouched");
+    let report = ingest(&cfg, &CountingEmbedder::new()).expect("re-ingest");
+    assert_eq!(
+        report.ingested, 1,
+        "body edit with a stale declared checksum must re-index"
     );
 }
 

@@ -208,6 +208,20 @@ impl Note {
     pub fn body_checksum(&self) -> Checksum {
         Checksum::compute(self.body.as_bytes())
     }
+
+    /// The change token over the WHOLE note — canonical serialization of
+    /// frontmatter + body ([`Self::to_markdown`]).
+    ///
+    /// This is what the index keys change detection on: any edit anywhere
+    /// in the note (companion content below a managed region, frontmatter
+    /// tags, the body) changes the token. The frontmatter `checksum`
+    /// field is producer metadata (it covers only what the producer
+    /// declares — e.g. a managed region) and is deliberately NOT used as
+    /// the note-level change token.
+    #[must_use]
+    pub fn change_token(&self) -> Checksum {
+        Checksum::compute(self.to_markdown().as_bytes())
+    }
 }
 
 /// Split `content` into `(yaml, body)` when it opens with a `---`

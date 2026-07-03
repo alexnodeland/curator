@@ -130,8 +130,9 @@ impl CurioAdapter {
             }
         };
 
-        // The in-memory kp-note view: curio_id → kp_id curio:<id>, the
-        // declared checksum as the change token. NEVER written back.
+        // The in-memory kp-note view: curio_id → kp_id curio:<id>. The
+        // declared checksum rides along as producer metadata (change
+        // detection keys on the full note, not on it). NEVER written back.
         let mut kp_fm = NoteFrontmatter::new(KpId::Curio(fm.curio_id.clone()), fm.title.clone());
         kp_fm.checksum = Some(fm.checksum.clone());
         kp_fm.tags = fm.tags.clone();
