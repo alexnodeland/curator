@@ -11,13 +11,18 @@
 //!    optionally (config `webdav_fallback`) a small CRC-verified WebDAV
 //!    `.prop`/`.zip` shim for self-hosted attachment stores.
 //!
-//! All tests are fixture-driven (hermetic).
+//! Identity is strictly `zotero:<itemKey>` — a citekey or title change is
+//! an update to the same note, never a duplicate. Tombstones remove only
+//! fully machine-owned files; anything the user edited moves to
+//! `.kp/trash/`. The library-version cursor persists in kp-index's
+//! cursors table. All tests are fixture-driven (hermetic).
 
 pub mod api;
 pub mod error;
 pub mod item;
 pub mod managed;
 pub mod map;
+pub mod sync;
 pub mod webdav;
 
 pub use api::{ItemsDelta, ZoteroApi};
@@ -25,4 +30,5 @@ pub use error::ZoteroError;
 pub use item::{Creator, Deleted, Fulltext, Item, ItemData, Tag};
 pub use managed::{MANAGED_BEGIN, MANAGED_END, ManagedSplit, is_pristine, split_managed};
 pub use map::{MappedNote, map_item, note_rel_path, render_managed};
+pub use sync::{CURSOR_CONSUMER, CURSOR_FILE, SyncOptions, SyncReport, sync};
 pub use webdav::{PropInfo, ShimCaps, WebDavShim, parse_prop};
