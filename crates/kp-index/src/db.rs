@@ -24,14 +24,16 @@ use std::sync::Once;
 use kp_core::note::{Frontmatter, Note};
 use rusqlite::{Connection, OpenFlags, params};
 
-use crate::chunk::{ChunkParams, chunk_text};
+use crate::chunk::{Chunk, ChunkParams, chunk_text};
 use crate::embed::Embedder;
 use crate::error::IndexError;
 
 /// The on-disk schema version. Bumping it is an EPOCH event: readers of a
 /// different version refuse the file and demand a rebuild — there are no
 /// in-place migrations, ever.
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// v2: added the `seen_events` dedupe table for the Curio events tail.
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Register sqlite-vec for every connection this process opens.
 fn register_sqlite_vec() {
@@ -77,6 +79,39 @@ pub struct IndexMeta {
     pub epoch: i64,
     /// RFC 3339 build timestamp.
     pub built_at: String,
+}
+
+/// A note's indexed change-detection state: where it was and what change
+/// token it carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteState {
+    /// Vault-relative path as indexed.
+    pub path: String,
+    /// The indexed change token (`sha256:<hex>`), when one was recorded.
+    pub checksum: Option<String>,
+}
+
+/// One behavioral event's effect on a note's rollup row (see
+/// [`Index::apply_behavior`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BehaviorDelta {
+    /// Added to `opened_count`.
+    pub opened_delta: i64,
+    /// `Some(v)` sets the starred flag (negation events set `false`).
+    pub starred: Option<bool>,
+    /// `Some(v)` sets the read-later flag (negation events set `false`).
+    pub read_later: Option<bool>,
+    /// Candidate for `last_activity` (kept monotonically maximal).
+    pub activity_ts: Option<String>,
+}
+
+/// A note's behavioral rollup as stored in the `behavior` table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BehaviorStats {
+    pub opened_count: i64,
+    pub starred: bool,
+    pub read_later: bool,
+    pub last_activity: Option<String>,
 }
 
 /// The single writer handle (see module docs for the discipline).
@@ -171,9 +206,33 @@ impl Index {
         embedder: &dyn Embedder,
         params: ChunkParams,
     ) -> Result<(), IndexError> {
+        let chunks = chunk_text(&note.body, params);
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+        let vectors = embedder.embed(&texts)?;
+        self.upsert_note_prechunked(note, embedder, &chunks, &vectors)
+    }
+
+    /// [`Self::upsert_note`] for callers that chunk and embed OUTSIDE the
+    /// index — the batch-ingest path, where every chunk of a whole ingest
+    /// run goes through one `Embedder::embed` call. `vectors[i]` embeds
+    /// `chunks[i]`; the embedder is still required so the model-identity
+    /// guard holds on this path too.
+    pub fn upsert_note_prechunked(
+        &mut self,
+        note: &Note,
+        embedder: &dyn Embedder,
+        chunks: &[Chunk],
+        vectors: &[Vec<f32>],
+    ) -> Result<(), IndexError> {
         // A different model must never write vectors into this file, no
         // matter what the caller opened it with.
         check_meta(&self.meta, embedder)?;
+        if chunks.len() != vectors.len() {
+            return Err(IndexError::ChunkVectorMismatch {
+                chunks: chunks.len(),
+                vectors: vectors.len(),
+            });
+        }
 
         let kp_id = note.kp_id().to_string();
         let title = note.title();
@@ -198,9 +257,6 @@ impl Index {
                 Some(note.body_checksum().to_string()),
             ),
         };
-        let chunks = chunk_text(&note.body, params);
-        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
-        let vectors = embedder.embed(&texts)?;
 
         let tx = self.conn.transaction()?;
         // A note re-minted at the same path is a REPLACEMENT: evict any
@@ -238,7 +294,7 @@ impl Index {
                 note.body
             ],
         )?;
-        for (chunk, vector) in chunks.iter().zip(&vectors) {
+        for (chunk, vector) in chunks.iter().zip(vectors) {
             if vector.len() != self.meta.dims {
                 return Err(IndexError::WrongDims {
                     id: embedder.id().to_owned(),
@@ -309,6 +365,142 @@ impl Index {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?)
+    }
+
+    /// Every `(file, line)` cursor a consumer holds, sorted by file name.
+    pub fn cursors_for(&self, consumer: &str) -> Result<Vec<(String, i64)>, IndexError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file, line FROM cursors WHERE consumer = ?1 ORDER BY file")?;
+        let rows = stmt
+            .query_map(params![consumer], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Drop a consumer's cursor for one file (housekeeping when the
+    /// producer's retention deletes the file).
+    pub fn remove_cursor(&mut self, consumer: &str, file: &str) -> Result<(), IndexError> {
+        self.conn.execute(
+            "DELETE FROM cursors WHERE consumer = ?1 AND file = ?2",
+            params![consumer, file],
+        )?;
+        Ok(())
+    }
+
+    /// Record an event id as folded. Returns `true` when the id is NEW
+    /// (the caller should fold it) and `false` on a replay (skip).
+    pub fn mark_event_seen(
+        &mut self,
+        consumer: &str,
+        event_id: &str,
+        ts: &str,
+    ) -> Result<bool, IndexError> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO seen_events (consumer, event_id, ts) VALUES (?1, ?2, ?3)",
+            params![consumer, event_id, ts],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Prune seen-event ids with `ts` strictly before `before_ts` (RFC 3339
+    /// UTC strings compare lexicographically). Returns the rows removed.
+    pub fn prune_seen_events(
+        &mut self,
+        consumer: &str,
+        before_ts: &str,
+    ) -> Result<usize, IndexError> {
+        Ok(self.conn.execute(
+            "DELETE FROM seen_events WHERE consumer = ?1 AND ts < ?2",
+            params![consumer, before_ts],
+        )?)
+    }
+
+    /// Fold one behavioral delta into a note's rollup row. `starred` /
+    /// `read_later` of `None` leave the flag untouched; `activity_ts`
+    /// advances `last_activity` monotonically (max of old and new).
+    pub fn apply_behavior(&mut self, kp_id: &str, delta: &BehaviorDelta) -> Result<(), IndexError> {
+        self.conn.execute(
+            "INSERT INTO behavior (kp_id, opened_count, starred, read_later, last_activity)
+             VALUES (?1, ?2, COALESCE(?3, 0), COALESCE(?4, 0), ?5)
+             ON CONFLICT(kp_id) DO UPDATE SET
+               opened_count = opened_count + ?2,
+               starred      = COALESCE(?3, starred),
+               read_later   = COALESCE(?4, read_later),
+               last_activity = CASE
+                 WHEN ?5 IS NULL THEN last_activity
+                 WHEN last_activity IS NULL OR last_activity < ?5 THEN ?5
+                 ELSE last_activity
+               END",
+            params![
+                kp_id,
+                delta.opened_delta,
+                delta.starred.map(i64::from),
+                delta.read_later.map(i64::from),
+                delta.activity_ts,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// A note's behavioral rollup, if any events have folded into it.
+    pub fn behavior(&self, kp_id: &str) -> Result<Option<BehaviorStats>, IndexError> {
+        let row = self.conn.query_row(
+            "SELECT opened_count, starred, read_later, last_activity
+             FROM behavior WHERE kp_id = ?1",
+            params![kp_id],
+            |r| {
+                Ok(BehaviorStats {
+                    opened_count: r.get(0)?,
+                    starred: r.get::<_, i64>(1)? != 0,
+                    read_later: r.get::<_, i64>(2)? != 0,
+                    last_activity: r.get(3)?,
+                })
+            },
+        );
+        match row {
+            Ok(stats) => Ok(Some(stats)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// The indexed `(path, checksum)` of a note, if present — the change
+    /// detector: an unchanged (checksum, path) pair skips re-embedding.
+    pub fn note_state(&self, kp_id: &str) -> Result<Option<NoteState>, IndexError> {
+        let row = self.conn.query_row(
+            "SELECT path, checksum FROM notes WHERE kp_id = ?1",
+            params![kp_id],
+            |r| {
+                Ok(NoteState {
+                    path: r.get(0)?,
+                    checksum: r.get(1)?,
+                })
+            },
+        );
+        match row {
+            Ok(state) => Ok(Some(state)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Every indexed `(kp_id, path)` pair — lets ingest prune notes whose
+    /// files vanished from the vault.
+    pub fn note_ids_and_paths(&self) -> Result<Vec<(String, String)>, IndexError> {
+        let mut stmt = self.conn.prepare("SELECT kp_id, path FROM notes")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Drop every outgoing edge of a note (before re-adding from a fresh
+    /// parse — link rows must not accrete across re-ingests).
+    pub fn clear_links_from(&mut self, from_id: &str) -> Result<(), IndexError> {
+        self.conn
+            .execute("DELETE FROM links WHERE from_id = ?1", params![from_id])?;
+        Ok(())
     }
 
     /// `PRAGMA integrity_check` — used by the epoch machinery before a
@@ -540,6 +732,18 @@ fn create_schema(conn: &Connection, dims: usize) -> Result<(), IndexError> {
           read_later    INTEGER NOT NULL DEFAULT 0,
           last_activity TEXT
         );
+
+        -- Event ids already folded into `behavior`, per consumer. Makes
+        -- replay idempotent when a cursor's file vanishes and the tail
+        -- restarts from the oldest existing file. Pruned by ts: ids older
+        -- than the oldest existing event file can never be replayed.
+        CREATE TABLE seen_events (
+          consumer TEXT NOT NULL,
+          event_id TEXT NOT NULL,
+          ts       TEXT NOT NULL,
+          PRIMARY KEY (consumer, event_id)
+        );
+        CREATE INDEX seen_events_ts ON seen_events(consumer, ts);
 
         -- One row per librarian digest (digests are idempotent by date).
         CREATE TABLE digest_log (
@@ -788,6 +992,165 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0))
             .expect("count");
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn prechunked_upsert_matches_the_inline_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, e) = tmp_index(dir.path());
+        let n = note("a.md", "alpha beta gamma");
+        let chunks = chunk_text(&n.body, ChunkParams::default());
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+        let vectors = e.embed(&texts).expect("embeds");
+        idx.upsert_note_prechunked(&n, &e, &chunks, &vectors)
+            .expect("upsert");
+        assert_eq!(idx.note_count().expect("count"), 1);
+        // Length mismatch is refused before any write.
+        let err = idx
+            .upsert_note_prechunked(&n, &e, &chunks, &[])
+            .unwrap_err();
+        assert!(matches!(err, IndexError::ChunkVectorMismatch { .. }));
+    }
+
+    #[test]
+    fn seen_events_dedupe_and_prune() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        assert!(
+            idx.mark_event_seen("c", "01AAA", "2026-07-01T00:00:00.000Z")
+                .expect("mark")
+        );
+        assert!(
+            !idx.mark_event_seen("c", "01AAA", "2026-07-01T00:00:00.000Z")
+                .expect("replay"),
+            "second sighting must report already-seen"
+        );
+        // Another consumer's view is independent.
+        assert!(
+            idx.mark_event_seen("other", "01AAA", "2026-07-01T00:00:00.000Z")
+                .expect("mark")
+        );
+        assert!(
+            idx.mark_event_seen("c", "01BBB", "2026-07-02T00:00:00.000Z")
+                .expect("mark")
+        );
+        // Prune strictly-before: 01AAA goes, 01BBB stays.
+        let n = idx
+            .prune_seen_events("c", "2026-07-02T00:00:00.000Z")
+            .expect("prune");
+        assert_eq!(n, 1);
+        assert!(
+            idx.mark_event_seen("c", "01AAA", "2026-07-01T00:00:00.000Z")
+                .expect("pruned id is fresh again")
+        );
+        assert!(
+            !idx.mark_event_seen("c", "01BBB", "2026-07-02T00:00:00.000Z")
+                .expect("kept id still dedupes")
+        );
+    }
+
+    #[test]
+    fn behavior_folds_deltas_and_honors_negation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        assert_eq!(idx.behavior("curio:x").expect("none"), None);
+
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                opened_delta: 1,
+                starred: Some(true),
+                activity_ts: Some("2026-07-01T10:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                opened_delta: 1,
+                read_later: Some(true),
+                activity_ts: Some("2026-07-02T10:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        // Negation: unstar. An OLDER ts must not roll last_activity back.
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                starred: Some(false),
+                activity_ts: Some("2026-07-01T12:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+
+        let stats = idx.behavior("curio:x").expect("row").expect("present");
+        assert_eq!(
+            stats,
+            BehaviorStats {
+                opened_count: 2,
+                starred: false,
+                read_later: true,
+                last_activity: Some("2026-07-02T10:00:00.000Z".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn note_state_reports_path_and_checksum() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, e) = tmp_index(dir.path());
+        assert_eq!(idx.note_state("path:a.md").expect("none"), None);
+        idx.upsert_note(&note("a.md", "body"), &e, ChunkParams::default())
+            .expect("insert");
+        let state = idx.note_state("path:a.md").expect("row").expect("present");
+        assert_eq!(state.path, "a.md");
+        assert!(state.checksum.expect("has token").starts_with("sha256:"));
+        assert_eq!(
+            idx.note_ids_and_paths().expect("list"),
+            vec![("path:a.md".to_owned(), "a.md".to_owned())]
+        );
+    }
+
+    #[test]
+    fn cursors_enumerate_and_remove() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        idx.set_cursor("c", "events-20260702.jsonl", 3)
+            .expect("set");
+        idx.set_cursor("c", "events-20260701.jsonl", 9)
+            .expect("set");
+        idx.set_cursor("other", "x.jsonl", 1).expect("set");
+        assert_eq!(
+            idx.cursors_for("c").expect("list"),
+            vec![
+                ("events-20260701.jsonl".to_owned(), 9),
+                ("events-20260702.jsonl".to_owned(), 3),
+            ]
+        );
+        idx.remove_cursor("c", "events-20260701.jsonl")
+            .expect("remove");
+        assert_eq!(
+            idx.cursors_for("c").expect("list"),
+            vec![("events-20260702.jsonl".to_owned(), 3)]
+        );
+    }
+
+    #[test]
+    fn clear_links_from_drops_only_outgoing_edges() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        idx.add_link("kp:a", "kp:b", "wikilink").expect("link");
+        idx.add_link("kp:a", "kp:c", "markdown").expect("link");
+        idx.add_link("kp:b", "kp:a", "wikilink").expect("link");
+        idx.clear_links_from("kp:a").expect("clear");
+        let n: i64 = idx
+            .conn
+            .query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(n, 1, "incoming edge to kp:a must survive");
     }
 
     #[test]

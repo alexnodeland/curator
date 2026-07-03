@@ -16,7 +16,9 @@ pub mod error;
 pub mod search;
 
 pub use chunk::{Chunk, ChunkParams, chunk_text};
-pub use db::{Index, IndexMeta, IndexReader, SCHEMA_VERSION};
+pub use db::{
+    BehaviorDelta, BehaviorStats, Index, IndexMeta, IndexReader, NoteState, SCHEMA_VERSION,
+};
 pub use embed::{Embedder, HashEmbedder};
 #[cfg(feature = "embed-onnx")]
 pub use embed_onnx::FastEmbedder;

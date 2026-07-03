@@ -57,6 +57,9 @@ pub enum IndexError {
         got: usize,
         expected: usize,
     },
+    /// A pre-embedded upsert supplied mismatched chunk/vector counts.
+    #[error("pre-embedded upsert got {chunks} chunks but {vectors} vectors")]
+    ChunkVectorMismatch { chunks: usize, vectors: usize },
     /// Vault trouble while sourcing notes for an epoch build.
     #[error(transparent)]
     Vault(#[from] kp_core::VaultError),
