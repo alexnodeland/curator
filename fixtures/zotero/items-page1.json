@@ -1,0 +1,87 @@
+[
+  {
+    "key": "KEYJRNL1",
+    "version": 40,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "links": {
+      "self": { "href": "https://api.example.test/users/777/items/KEYJRNL1", "type": "application/json" }
+    },
+    "meta": { "creatorSummary": "Lovelace and Babbage", "parsedDate": "2024-05-01", "numChildren": 1 },
+    "data": {
+      "key": "KEYJRNL1",
+      "version": 40,
+      "itemType": "journalArticle",
+      "title": "Analytical Engines Reconsidered",
+      "creators": [
+        { "creatorType": "author", "firstName": "Ada", "lastName": "Lovelace" },
+        { "creatorType": "author", "firstName": "Charles", "lastName": "Babbage" }
+      ],
+      "abstractNote": "A re-examination of mechanical computation, its programs, and the first published algorithm.",
+      "publicationTitle": "Journal of Speculative Computing",
+      "volume": "12",
+      "issue": "3",
+      "pages": "101-115",
+      "date": "2024-05-01",
+      "series": "",
+      "seriesTitle": "",
+      "seriesText": "",
+      "journalAbbreviation": "J. Spec. Comput.",
+      "language": "en",
+      "DOI": "10.9999/jsc.2024.0501",
+      "ISSN": "0000-0000",
+      "shortTitle": "",
+      "url": "https://journals.example.test/jsc/2024/analytical-engines",
+      "accessDate": "2026-06-30T10:00:00Z",
+      "archive": "",
+      "archiveLocation": "",
+      "libraryCatalog": "example.test",
+      "callNumber": "",
+      "rights": "",
+      "extra": "",
+      "tags": [
+        { "tag": "computing-history", "type": 1 },
+        { "tag": "algorithms" }
+      ],
+      "collections": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T10:00:00Z",
+      "dateModified": "2026-07-01T08:30:00Z"
+    }
+  },
+  {
+    "key": "KEYBOOK1",
+    "version": 41,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "creatorSummary": "Hopper", "parsedDate": "1984", "numChildren": 0 },
+    "data": {
+      "key": "KEYBOOK1",
+      "version": 41,
+      "itemType": "book",
+      "title": "Compilers and How to Grow Them",
+      "creators": [
+        { "creatorType": "author", "firstName": "Grace", "lastName": "Hopper" },
+        { "creatorType": "editor", "firstName": "Jean", "lastName": "Sammet" }
+      ],
+      "abstractNote": "",
+      "series": "",
+      "seriesNumber": "",
+      "volume": "",
+      "numberOfVolumes": "",
+      "edition": "1",
+      "place": "New York",
+      "publisher": "Harbor Press",
+      "date": "1984",
+      "numPages": "312",
+      "language": "en",
+      "ISBN": "978-0-00-000000-0",
+      "shortTitle": "",
+      "url": "",
+      "accessDate": "",
+      "tags": [ { "tag": "compilers", "type": 1 } ],
+      "collections": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T11:00:00Z",
+      "dateModified": "2026-06-30T11:00:00Z"
+    }
+  }
+]

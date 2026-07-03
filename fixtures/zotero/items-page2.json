@@ -1,0 +1,56 @@
+[
+  {
+    "key": "KEYWEBP1",
+    "version": 42,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "KEYWEBP1",
+      "version": 42,
+      "itemType": "webpage",
+      "title": "Why Plain Text Endures",
+      "creators": [ { "creatorType": "author", "firstName": "Mina", "lastName": "Sato" } ],
+      "abstractNote": "Notes on the longevity of plain-text formats.",
+      "websiteTitle": "The Durable Web",
+      "websiteType": "blog",
+      "date": "2026-03",
+      "shortTitle": "",
+      "url": "https://durable.example.test/plain-text",
+      "accessDate": "2026-06-29T18:12:00Z",
+      "language": "en",
+      "rights": "",
+      "extra": "",
+      "tags": [],
+      "collections": [],
+      "relations": {},
+      "dateAdded": "2026-06-29T18:12:00Z",
+      "dateModified": "2026-06-29T18:12:00Z"
+    }
+  },
+  {
+    "key": "KEYATT01",
+    "version": 42,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "KEYATT01",
+      "version": 42,
+      "itemType": "attachment",
+      "parentItem": "KEYJRNL1",
+      "linkMode": "imported_url",
+      "title": "Full Text PDF",
+      "accessDate": "2026-06-30T10:01:00Z",
+      "url": "https://journals.example.test/jsc/2024/analytical-engines.pdf",
+      "note": "",
+      "contentType": "application/pdf",
+      "charset": "",
+      "filename": "analytical-engines.pdf",
+      "md5": "0123456789abcdef0123456789abcdef",
+      "mtime": 1767103260000,
+      "tags": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T10:01:00Z",
+      "dateModified": "2026-06-30T10:01:00Z"
+    }
+  }
+]

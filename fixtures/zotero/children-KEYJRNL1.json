@@ -1,0 +1,40 @@
+[
+  {
+    "key": "KEYATT01",
+    "version": 42,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "KEYATT01",
+      "version": 42,
+      "itemType": "attachment",
+      "parentItem": "KEYJRNL1",
+      "linkMode": "imported_url",
+      "title": "Full Text PDF",
+      "url": "https://journals.example.test/jsc/2024/analytical-engines.pdf",
+      "contentType": "application/pdf",
+      "filename": "analytical-engines.pdf",
+      "tags": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T10:01:00Z",
+      "dateModified": "2026-06-30T10:01:00Z"
+    }
+  },
+  {
+    "key": "KEYNOTE1",
+    "version": 39,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "KEYNOTE1",
+      "version": 39,
+      "itemType": "note",
+      "parentItem": "KEYJRNL1",
+      "note": "<p>reading note that must never become a vault file</p>",
+      "tags": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T10:02:00Z",
+      "dateModified": "2026-06-30T10:02:00Z"
+    }
+  }
+]

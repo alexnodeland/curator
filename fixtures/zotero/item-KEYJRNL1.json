@@ -1,0 +1,32 @@
+{
+  "key": "KEYJRNL1",
+  "version": 40,
+  "library": { "type": "user", "id": 777, "name": "fixture" },
+  "meta": { "creatorSummary": "Lovelace and Babbage", "parsedDate": "2024-05-01", "numChildren": 1 },
+  "data": {
+    "key": "KEYJRNL1",
+    "version": 40,
+    "itemType": "journalArticle",
+    "title": "Analytical Engines Reconsidered",
+    "creators": [
+      { "creatorType": "author", "firstName": "Ada", "lastName": "Lovelace" },
+      { "creatorType": "author", "firstName": "Charles", "lastName": "Babbage" }
+    ],
+    "abstractNote": "A re-examination of mechanical computation, its programs, and the first published algorithm.",
+    "publicationTitle": "Journal of Speculative Computing",
+    "volume": "12",
+    "issue": "3",
+    "pages": "101-115",
+    "date": "2024-05-01",
+    "DOI": "10.9999/jsc.2024.0501",
+    "url": "https://journals.example.test/jsc/2024/analytical-engines",
+    "tags": [
+      { "tag": "computing-history", "type": 1 },
+      { "tag": "algorithms" }
+    ],
+    "collections": [],
+    "relations": {},
+    "dateAdded": "2026-06-30T10:00:00Z",
+    "dateModified": "2026-07-01T08:30:00Z"
+  }
+}

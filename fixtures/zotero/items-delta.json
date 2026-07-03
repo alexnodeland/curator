@@ -1,0 +1,32 @@
+[
+  {
+    "key": "KEYBOOK1",
+    "version": 45,
+    "library": { "type": "user", "id": 777, "name": "fixture" },
+    "meta": { "creatorSummary": "Hopper", "parsedDate": "1984", "numChildren": 0 },
+    "data": {
+      "key": "KEYBOOK1",
+      "version": 45,
+      "itemType": "book",
+      "title": "Compilers and How to Grow Them (Second Edition)",
+      "creators": [
+        { "creatorType": "author", "firstName": "Grace", "lastName": "Hopper" },
+        { "creatorType": "editor", "firstName": "Jean", "lastName": "Sammet" }
+      ],
+      "abstractNote": "",
+      "edition": "2",
+      "place": "New York",
+      "publisher": "Harbor Press",
+      "date": "1986",
+      "numPages": "355",
+      "language": "en",
+      "ISBN": "978-0-00-000000-0",
+      "url": "",
+      "tags": [ { "tag": "compilers", "type": 1 } ],
+      "collections": [],
+      "relations": {},
+      "dateAdded": "2026-06-30T11:00:00Z",
+      "dateModified": "2026-07-02T09:00:00Z"
+    }
+  }
+]
