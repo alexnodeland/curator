@@ -1,6 +1,6 @@
 //! `kp` — the Knowledge Plane CLI.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -10,9 +10,24 @@ use kp_mcp::KpEngine;
 use kp_mcp::types::{NoteKind, SearchMode};
 
 /// Subcommands the v1 CLI grows into (per `docs/design/architecture.md`).
-const COMMANDS: [&str; 15] = [
-    "init", "ingest", "index", "reindex", "search", "get", "related", "recent", "mcp", "propose",
-    "review", "apply", "digest", "status", "zotero",
+const COMMANDS: [&str; 17] = [
+    "init",
+    "ingest",
+    "index",
+    "reindex",
+    "search",
+    "get",
+    "related",
+    "recent",
+    "mcp",
+    "propose",
+    "review",
+    "apply",
+    "proposals",
+    "digest",
+    "doctor",
+    "status",
+    "zotero",
 ];
 
 const USAGE: &str = "kp — the Knowledge Plane
@@ -20,7 +35,7 @@ const USAGE: &str = "kp — the Knowledge Plane
 Usage: kp <command> [args]
 
 Commands:
-  init            create kp.toml and the vault scaffolding
+  init [dir]      scaffold a vault: kp.toml (from the example), .kp/, first index
   ingest          run producer adapters (Curio, web clips) into the vault/index
   index rebuild   rebuild index.db (blue/green epoch swap)
   reindex         alias for `index rebuild`
@@ -30,10 +45,12 @@ Commands:
   related         embedding-nearest notes to a note
   recent          recently ingested/changed notes
   mcp serve       serve the MCP surface (stdio default; --http + bearer)
-  propose         create a proposals/v1 changeset
-  review          render a proposal for human review
-  apply           validate and apply a proposal
-  digest          run the deterministic librarian digest
+  propose         create a proposals/v1 changeset from a directory of files
+  review <id>     render a proposal for human review
+  apply <id>      validate and apply a proposal (stamps applied/rejected)
+  proposals list  list stored proposals and their status
+  digest run      run the deterministic librarian digest (--auto to apply)
+  doctor          config / vault / index / cursors health
   status          vault + index + proposals overview
 
 Options (ingest / index rebuild / zotero sync):
@@ -57,6 +74,21 @@ Options (mcp serve):
   --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
   --http           streamable HTTP on [mcp].http_bind — REQUIRES the bearer
                    token env named by [mcp].bearer_token_env
+
+Options (digest run):
+  --auto           auto-apply the digest proposal when the gate admits it
+                   (pure additions under [librarian].digest_dir, kp:<uuidv7>)
+  --now <rfc3339>  inject the clock (testing/reproducibility; default: now)
+
+Options (propose):
+  --title <t>      proposal title (required)
+  --rationale <r>  why this change (default: empty)
+  --author <a>     proposal author (default: kp-cli)
+  --from <dir>     directory of generated files; every file maps to the
+                   same vault-relative path (required)
+
+Options (init):
+  --embedder <e>   builtin | hash — stamped into the scaffolded kp.toml
 
 Options:
   -h, --help       show this help
@@ -100,6 +132,25 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Some("digest") => match args.get(1).map(String::as_str) {
+            Some("run") => run_or_fail(cmd_digest_run(&args[2..])),
+            other => {
+                eprintln!("kp digest: unknown subcommand {other:?} — try `kp digest run`");
+                ExitCode::from(2)
+            }
+        },
+        Some("propose") => run_or_fail(cmd_propose(&args[1..])),
+        Some("review") => run_or_fail(cmd_review(&args[1..])),
+        Some("apply") => run_or_fail(cmd_apply(&args[1..])),
+        Some("proposals") => match args.get(1).map(String::as_str) {
+            Some("list") => run_or_fail(cmd_proposals_list(&args[2..])),
+            other => {
+                eprintln!("kp proposals: unknown subcommand {other:?} — try `kp proposals list`");
+                ExitCode::from(2)
+            }
+        },
+        Some("doctor") => run_or_fail(cmd_doctor(&args[1..])),
+        Some("init") => run_or_fail(cmd_init(&args[1..])),
         Some(cmd) if COMMANDS.contains(&cmd) => {
             eprintln!("kp {cmd}: not implemented yet (pre-release scaffold)");
             ExitCode::from(2)
@@ -505,6 +556,507 @@ fn cmd_zotero_sync(args: &[String]) -> Result<(), String> {
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Librarian: digest + proposals lifecycle
+// ---------------------------------------------------------------------------
+
+fn cmd_digest_run(args: &[String]) -> Result<(), String> {
+    let mut config_path: Option<PathBuf> = None;
+    let mut json = false;
+    let mut auto = false;
+    let mut now = kp_core::time::unix_now();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                let value = it.next().ok_or("--config needs a path")?;
+                config_path = Some(PathBuf::from(value));
+            }
+            "--json" => json = true,
+            "--auto" => auto = true,
+            "--now" => {
+                let value = it.next().ok_or("--now needs an RFC 3339 UTC timestamp")?;
+                now = kp_core::time::parse_rfc3339_utc(value)
+                    .ok_or_else(|| format!("--now {value:?} is not RFC 3339 UTC (…Z)"))?;
+            }
+            other => return Err(format!("unknown argument {other:?}")),
+        }
+    }
+    let config = load_config(config_path)?;
+    let embedder = embedder_for(&config)?;
+    let report = kp_librarian::run_digest(&config, embedder.as_ref(), now, auto)
+        .map_err(|e| e.to_string())?;
+    if json {
+        return print_json(&report);
+    }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+    match &report.skipped {
+        Some(reason) => println!("skipped: {reason}"),
+        None => {
+            let applied = if report.applied {
+                ", auto-applied"
+            } else {
+                " (open — `kp apply` after review)"
+            };
+            println!(
+                "digest {} → {}: {} surfaced, {} quiet of {} candidate(s); proposal {}{}",
+                report.date,
+                report.note_path,
+                report.items,
+                report.quiet,
+                report.candidates,
+                report.proposal_id.as_deref().unwrap_or("-"),
+                applied,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_propose(args: &[String]) -> Result<(), String> {
+    let mut config_path: Option<PathBuf> = None;
+    let mut json = false;
+    let mut title: Option<String> = None;
+    let mut rationale = String::new();
+    let mut author = "kp-cli".to_owned();
+    let mut from: Option<PathBuf> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                let value = it.next().ok_or("--config needs a path")?;
+                config_path = Some(PathBuf::from(value));
+            }
+            "--json" => json = true,
+            "--title" => title = Some(it.next().ok_or("--title needs a value")?.clone()),
+            "--rationale" => rationale = it.next().ok_or("--rationale needs a value")?.clone(),
+            "--author" => author = it.next().ok_or("--author needs a value")?.clone(),
+            "--from" => from = Some(PathBuf::from(it.next().ok_or("--from needs a directory")?)),
+            other => return Err(format!("unknown argument {other:?}")),
+        }
+    }
+    let title = title.ok_or("propose needs --title")?;
+    let from = from.ok_or("propose needs --from <dir> (files map to vault-relative paths)")?;
+    let config = load_config(config_path)?;
+    let vault = kp_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+
+    let files = collect_proposal_files(&from)?;
+    if files.is_empty() {
+        return Err(format!("{} contains no files", from.display()));
+    }
+    let proposal = kp_core::create_proposal(
+        &vault,
+        &config.vault.proposals_dir,
+        &author,
+        &title,
+        &rationale,
+        &files,
+    )
+    .map_err(|e| e.to_string())?;
+    if json {
+        return print_json(&proposal);
+    }
+    println!(
+        "proposal {} created ({} file(s)) — `kp review {}`, then `kp apply {}`",
+        proposal.id,
+        proposal.files.len(),
+        proposal.id,
+        proposal.id
+    );
+    Ok(())
+}
+
+/// Every non-hidden file under `dir`, as `(vault-relative path, content)`,
+/// path-sorted. The directory layout IS the proposed vault layout.
+fn collect_proposal_files(dir: &Path) -> Result<Vec<kp_core::ProposalFile>, String> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_owned()];
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current)
+            .map_err(|e| format!("cannot read {}: {e}", current.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                let rel = path
+                    .strip_prefix(dir)
+                    .expect("walk stays under dir")
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("cannot read {} as UTF-8: {e}", path.display()))?;
+                out.push(kp_core::ProposalFile { path: rel, content });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+fn cmd_review(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    let [id] = q.positional.as_slice() else {
+        return Err("review needs exactly one id — `kp review <id>`".to_owned());
+    };
+    let config = load_config(q.config_path)?;
+    let vault = kp_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    let (proposal, patch) = kp_core::load_proposal(&vault, &config.vault.proposals_dir, id)
+        .map_err(|e| e.to_string())?;
+    print!("{}", kp_librarian::render_review(&proposal, &patch));
+    Ok(())
+}
+
+fn cmd_apply(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    let [id] = q.positional.as_slice() else {
+        return Err("apply needs exactly one id — `kp apply <id>`".to_owned());
+    };
+    let config = load_config(q.config_path)?;
+    let vault = kp_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    let report = kp_librarian::apply_proposal(&vault, &config.vault.proposals_dir, id)
+        .map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&report);
+    }
+    println!(
+        "applied {} ({}): {} file(s) written",
+        report.id,
+        report.title,
+        report.files_written.len()
+    );
+    for file in &report.files_written {
+        println!("  {file}");
+    }
+    Ok(())
+}
+
+fn cmd_proposals_list(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    if !q.positional.is_empty() {
+        return Err(format!("unexpected argument {:?}", q.positional[0]));
+    }
+    let config = load_config(q.config_path)?;
+    let vault = kp_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    let proposals =
+        kp_core::list_proposals(&vault, &config.vault.proposals_dir).map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&proposals);
+    }
+    if proposals.is_empty() {
+        println!("no proposals");
+        return Ok(());
+    }
+    for p in &proposals {
+        let status = serde_json::to_value(p.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        println!(
+            "{}  {:8}  {}  ({} file(s), by {})",
+            p.id,
+            status,
+            p.title,
+            p.files.len(),
+            p.author
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// doctor + init
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct DoctorCheck {
+    check: &'static str,
+    level: &'static str, // ok | warn | error
+    message: String,
+}
+
+fn check(checks: &mut Vec<DoctorCheck>, check: &'static str, level: &'static str, message: String) {
+    checks.push(DoctorCheck {
+        check,
+        level,
+        message,
+    });
+}
+
+fn cmd_doctor(args: &[String]) -> Result<(), String> {
+    let batch = parse_batch_args(args)?;
+    let config = batch.config;
+    let mut checks: Vec<DoctorCheck> = Vec::new();
+    check(
+        &mut checks,
+        "config",
+        "ok",
+        format!("schema {}", config.schema),
+    );
+
+    // Vault.
+    let vault = match kp_core::Vault::open(config.vault_path()) {
+        Ok(vault) => {
+            let notes = vault.note_paths().map(|p| p.len()).unwrap_or(0);
+            check(
+                &mut checks,
+                "vault",
+                "ok",
+                format!("{} — {notes} note(s)", vault.root().display()),
+            );
+            Some(vault)
+        }
+        Err(e) => {
+            check(&mut checks, "vault", "error", e.to_string());
+            None
+        }
+    };
+
+    // Proposals queue.
+    if let Some(vault) = &vault {
+        match kp_core::list_proposals(vault, &config.vault.proposals_dir) {
+            Ok(proposals) => {
+                let open = proposals
+                    .iter()
+                    .filter(|p| p.status == kp_core::ProposalStatus::Open)
+                    .count();
+                check(
+                    &mut checks,
+                    "proposals",
+                    if open > 0 { "warn" } else { "ok" },
+                    format!("{} total, {open} open", proposals.len()),
+                );
+            }
+            Err(e) => check(&mut checks, "proposals", "error", e.to_string()),
+        }
+        // The librarian's anchor.
+        let now_path = &config.librarian.now_path;
+        match vault.resolve(now_path) {
+            Ok(p) if p.exists() => check(&mut checks, "now.md", "ok", now_path.clone()),
+            _ => check(
+                &mut checks,
+                "now.md",
+                "warn",
+                format!("{now_path} missing — digests fall back to recency-only scoring"),
+            ),
+        }
+    }
+
+    // Index + embedder identity + cursors + digest log.
+    let index_path = config.index_path();
+    if !index_path.exists() {
+        check(
+            &mut checks,
+            "index",
+            "warn",
+            format!("{} missing — run `kp ingest`", index_path.display()),
+        );
+    } else {
+        match kp_index::IndexReader::open(&index_path) {
+            Ok(reader) => {
+                let meta = reader.meta().clone();
+                let notes = reader.note_count().unwrap_or(0);
+                check(
+                    &mut checks,
+                    "index",
+                    "ok",
+                    format!(
+                        "epoch {} · schema v{} · {} ({} dims) · {notes} note(s)",
+                        meta.epoch, meta.schema_version, meta.embedder_id, meta.dims
+                    ),
+                );
+                match embedder_for(&config) {
+                    Ok(embedder)
+                        if embedder.id() != meta.embedder_id || embedder.dims() != meta.dims =>
+                    {
+                        check(
+                            &mut checks,
+                            "embedder",
+                            "error",
+                            format!(
+                                "config says {} ({} dims) but the index was built by {} ({} dims) \
+                                 — run `kp index rebuild`",
+                                embedder.id(),
+                                embedder.dims(),
+                                meta.embedder_id,
+                                meta.dims
+                            ),
+                        );
+                    }
+                    Ok(embedder) => check(
+                        &mut checks,
+                        "embedder",
+                        "ok",
+                        format!("{} ({} dims)", embedder.id(), embedder.dims()),
+                    ),
+                    Err(e) => check(&mut checks, "embedder", "error", e),
+                }
+                match reader.last_digest_entry() {
+                    Ok(Some(entry)) => check(
+                        &mut checks,
+                        "digest",
+                        "ok",
+                        format!("latest {} ({})", entry.digest_date, entry.kp_id),
+                    ),
+                    Ok(None) => check(
+                        &mut checks,
+                        "digest",
+                        "ok",
+                        "none yet — `kp digest run`".to_owned(),
+                    ),
+                    Err(e) => check(&mut checks, "digest", "error", e.to_string()),
+                }
+                if config.curio.enabled {
+                    let cursors = reader
+                        .cursors_for(kp_ingest::EVENTS_CONSUMER)
+                        .map(|c| c.len())
+                        .unwrap_or(0);
+                    let events_dir = config.curio_events_dir();
+                    if events_dir.is_dir() {
+                        check(
+                            &mut checks,
+                            "curio",
+                            "ok",
+                            format!("{} — {cursors} cursor(s)", events_dir.display()),
+                        );
+                    } else {
+                        check(
+                            &mut checks,
+                            "curio",
+                            "warn",
+                            format!("[curio].events_dir {} missing", events_dir.display()),
+                        );
+                    }
+                }
+            }
+            Err(e) => check(&mut checks, "index", "error", e.to_string()),
+        }
+    }
+    if !config.curio.enabled {
+        check(&mut checks, "curio", "ok", "disabled".to_owned());
+    }
+
+    // MCP transport sanity.
+    match config.mcp.transport.as_str() {
+        "stdio" => check(&mut checks, "mcp", "ok", "stdio".to_owned()),
+        "http" => match config.mcp.bearer_token() {
+            Some(_) => check(
+                &mut checks,
+                "mcp",
+                "ok",
+                format!("http on {} (bearer set)", config.mcp.http_bind),
+            ),
+            None => check(
+                &mut checks,
+                "mcp",
+                "error",
+                format!(
+                    "transport http but ${} is unset — the server will refuse to start",
+                    config.mcp.bearer_token_env
+                ),
+            ),
+        },
+        other => check(
+            &mut checks,
+            "mcp",
+            "error",
+            format!("unknown transport {other:?}"),
+        ),
+    }
+
+    if batch.json {
+        print_json(&checks)?;
+    } else {
+        for c in &checks {
+            println!("{:5} {:9} {}", c.level, c.check, c.message);
+        }
+    }
+    let errors = checks.iter().filter(|c| c.level == "error").count();
+    if errors > 0 {
+        return Err(format!("{errors} check(s) failed"));
+    }
+    Ok(())
+}
+
+fn cmd_init(args: &[String]) -> Result<(), String> {
+    let mut dir = PathBuf::from(".");
+    let mut embedder_name = "builtin".to_owned();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--embedder" => {
+                embedder_name = it.next().ok_or("--embedder needs builtin|hash")?.clone();
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown argument {flag:?}")),
+            positional => dir = PathBuf::from(positional),
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let dir = std::fs::canonicalize(&dir).map_err(|e| e.to_string())?;
+
+    // kp.toml, scaffolded from the shipped example (comments included),
+    // pointed at this vault. Never overwrites an existing config.
+    let config_path = dir.join("kp.toml");
+    if config_path.exists() {
+        println!("kp.toml exists — leaving it untouched");
+    } else {
+        let content = include_str!("../../../kp.example.toml")
+            .replace(
+                "path = \"~/vault\"",
+                &format!("path = \"{}\"", dir.display()),
+            )
+            .replace(
+                "path = \"~/.local/share/kp/index.db\"",
+                &format!("path = \"{}\"", dir.join(".kp/index.db").display()),
+            )
+            .replace(
+                "embedder = \"builtin\"",
+                &format!("embedder = \"{embedder_name}\""),
+            );
+        // Refuse to write a config this binary cannot load back.
+        KpConfig::from_toml_str(&content).map_err(|e| e.to_string())?;
+        std::fs::write(&config_path, content).map_err(|e| e.to_string())?;
+        println!("created {}", config_path.display());
+    }
+    let config = KpConfig::load(&config_path).map_err(|e| e.to_string())?;
+
+    // .kp/ scaffolding + a starter interest anchor.
+    let proposals_dir = config.vault_path().join(&config.vault.proposals_dir);
+    std::fs::create_dir_all(&proposals_dir).map_err(|e| e.to_string())?;
+    println!("created {}", proposals_dir.display());
+    let now_path = config.vault_path().join(&config.librarian.now_path);
+    if !now_path.exists() {
+        std::fs::write(
+            &now_path,
+            "# Now\n\nWhat you are focused on right now. The librarian scores new notes \
+             against this note — keep it current.\n",
+        )
+        .map_err(|e| e.to_string())?;
+        println!("created {}", now_path.display());
+    }
+
+    // First index: a full ingest (creates index.db, epoch 1).
+    if config.index_path().exists() {
+        println!("index exists — skipping first ingest (`kp ingest` to refresh)");
+        return Ok(());
+    }
+    let embedder = embedder_for(&config)?;
+    let report = kp_ingest::ingest(&config, embedder.as_ref()).map_err(|e| e.to_string())?;
+    println!(
+        "first index built: {} note(s) ingested ({} skipped, {} ignored)",
+        report.ingested, report.skipped, report.ignored
+    );
     Ok(())
 }
 

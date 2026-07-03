@@ -21,7 +21,9 @@ publish = false
 
 [workspace.dependencies]
 # Intra-workspace crates (dependency direction is strictly downward:
-# kp-cli -> {kp-ingest, kp-zotero, kp-mcp, kp-librarian} -> kp-index -> kp-core).
+# kp-cli -> {kp-ingest, kp-zotero, kp-mcp, kp-librarian} -> kp-index -> kp-core;
+# kp-librarian also rides kp-ingest, one tier down, for the Curio
+# ownership oracle + managed-region parser).
 kp-core = { path = "crates/kp-core" }
 kp-index = { path = "crates/kp-index" }
 kp-ingest = { path = "crates/kp-ingest" }
