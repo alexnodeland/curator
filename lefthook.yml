@@ -1,0 +1,21 @@
+# Git hooks (lefthook). Install once: `just setup` (or `lefthook install`).
+
+pre-commit:
+  parallel: false
+  commands:
+    fmt:
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        head -n1 "{1}" | grep -qE '^(feat|fix|docs|refactor|chore|ci|test|perf|build|revert)(\([a-z0-9./-]+\))?!?: .+' || {
+          echo "commit subject must be a Conventional Commit: type(scope)?: summary" >&2
+          echo "types: feat fix docs refactor chore ci test perf build revert" >&2
+          exit 1
+        }

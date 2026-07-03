@@ -1,0 +1,35 @@
+# The gate suite. Runs on a clean runner with nothing but Rust — no
+# webview, no model server, no database, no forge services. If a step
+# here needs an external service, the quickstart promise is broken.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test (hermetic — no network, no models, no services)
+        run: cargo test --workspace
+
+      - name: grep litmus (public-safety boundary)
+        run: cargo run -p xtask -- litmus
