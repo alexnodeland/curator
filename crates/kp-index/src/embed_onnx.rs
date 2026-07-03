@@ -93,10 +93,22 @@ impl Embedder for FastEmbedder {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if guard.is_none() {
+            // First-ever use fetches the pinned model (~130 MB) from
+            // Hugging Face into model_dir. That must be VISIBLE, not a
+            // silent multi-minute hang: announce it and let fastembed
+            // render its stderr progress bar. Subsequent runs load from
+            // disk and print nothing.
+            if !self.model_dir.exists() {
+                eprintln!(
+                    "kp: fetching the pinned embedding model {ONNX_MODEL_ID} (~130 MB, one-time) \
+                     into {} — offline alternative: embedder = \"hash\" in kp.toml",
+                    self.model_dir.display()
+                );
+            }
             let model = TextEmbedding::try_new(
                 InitOptions::new(EmbeddingModel::BGESmallENV15)
                     .with_cache_dir(self.model_dir.clone())
-                    .with_show_download_progress(false),
+                    .with_show_download_progress(true),
             )
             .map_err(Self::backend_err)?;
             *guard = Some(model);

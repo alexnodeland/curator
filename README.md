@@ -23,14 +23,24 @@ agents** + **a deterministic librarian**.
 
 ## Quickstart
 
-Builds with cargo alone — no model server, no database service, no
-external anything:
+No model server, no database service, no daemon — one binary, one
+SQLite file:
 
 ```sh
 git clone <this-repo> && cd knowledge-plane
 cargo build --workspace
 cargo run -p kp-cli -- --help     # the `kp` binary
 ```
+
+**Two downloads to know about up front.** The default build compiles the
+in-process ONNX embedder: `cargo build` fetches ONNX Runtime binaries
+(via the `ort` download feature) at build time, and the first command
+that embeds (e.g. default-config `kp init` / `kp ingest`) fetches the
+pinned ~130 MB embedding model from Hugging Face into `.kp/models/`
+(one-time, announced with a progress bar). For a fully-offline or lean
+setup: set `embedder = "hash"` in `kp.toml` (deterministic, no ML), or
+build with `cargo build -p kp-cli --no-default-features` — that binary
+has no ONNX stack and performs zero downloads at build or run time.
 
 Copy [`kp.example.toml`](kp.example.toml) to `kp.toml` and point
 `[vault].path` at your markdown directory — or let `kp init` scaffold

@@ -88,7 +88,10 @@ Options (propose):
                    same vault-relative path (required)
 
 Options (init):
-  --embedder <e>   builtin | hash — stamped into the scaffolded kp.toml
+  --embedder <e>   builtin | hash — stamped into the scaffolded kp.toml.
+                   builtin fetches its pinned ~130 MB ONNX model on first
+                   use (one-time, announced); hash is offline and
+                   deterministic (no ML)
 
 Options:
   -h, --help       show this help
