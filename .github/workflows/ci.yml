@@ -1,6 +1,12 @@
-# The gate suite. Runs on a clean runner with nothing but Rust — no
-# webview, no model server, no database, no forge services. If a step
-# here needs an external service, the quickstart promise is broken.
+# The gate suite — a step-for-step mirror of `just ci`, which is the
+# executable source of truth (run locally on every change; this file
+# has not yet executed on a hosted runner — the repo has no remote
+# until launch). Designed for a clean runner with nothing but Rust —
+# no webview, no model server, no database, no forge services. If a
+# step here needs an external service, the quickstart promise is
+# broken. NOTE: tests use no external network, but kp-zotero's
+# wiremock tests bind loopback sockets — a sandbox denying bind() will
+# fail them.
 name: ci
 
 on:
@@ -30,7 +36,7 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: test (hermetic — no network, no models, no services)
+      - name: test (hermetic — no external network, no models, no services)
         run: cargo test --workspace
 
       - name: doc (rustdoc warning-clean; missing_docs gated on kp-core)

@@ -24,7 +24,10 @@ this document exists so the workflow is public from day one.
 - **Public-safety litmus.** This repo describes a product, never a
   deployment: no private hostnames, LAN addresses, or internal service
   names anywhere. `just litmus` fails the build on a hit.
-- **Rust.** Workspace lints apply (`unsafe_code = "forbid"`);
+- **Rust.** Workspace lints apply: `unsafe_code = "forbid"` everywhere
+  except kp-index, which scopes it to `deny` for exactly one documented
+  `#[allow]` site (sqlite-vec's `sqlite3_auto_extension` FFI
+  registration — see `crates/kp-index/src/db.rs`);
   `cargo fmt` formatting is canonical.
 
 ## Workflow

@@ -14,7 +14,9 @@ setup:
 build:
     cargo build --workspace
 
-# Run the full hermetic test suite (no network, no models, no services)
+# Run the full hermetic test suite: no external network (kp-zotero's
+# wiremock tests bind loopback sockets only), no model downloads, no
+# services
 test:
     cargo test --workspace
 

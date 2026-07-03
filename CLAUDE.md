@@ -21,7 +21,9 @@ pre-release.
 | `docs/design/` | architecture + decisions (the verdict-driven design record) |
 
 Dependency direction is strictly downward:
-`kp-cli → {kp-ingest, kp-zotero, kp-mcp, kp-librarian} → kp-index → kp-core`.
+`kp-cli → {kp-ingest, kp-zotero, kp-mcp, kp-librarian} → kp-index → kp-core`,
+plus one same-tier edge: `kp-librarian → kp-ingest` (the Curio
+ownership oracle + managed-region parser).
 
 ## Binding rules
 
