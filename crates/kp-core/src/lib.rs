@@ -11,9 +11,11 @@ pub mod config;
 pub mod id;
 pub mod note;
 pub mod proposal;
+pub mod vault;
 
 pub use checksum::{Checksum, ChecksumError};
 pub use config::{ConfigError, KpConfig};
 pub use id::{IdError, KpId};
 pub use note::{Frontmatter, Note, NoteError, NoteFrontmatter};
 pub use proposal::{Proposal, ProposalStatus};
+pub use vault::{Vault, VaultError};
