@@ -43,3 +43,8 @@ Synced. Both schema files are vendored byte-identical from the upstream
 Curio repo; [`PIN`](PIN) records the upstream commit and the sha256 of
 each vendored file. The Curio adapter in `kp-ingest` embeds these copies
 at compile time (`include_str!`) — the vendored bytes ARE the boundary.
+
+The pin is enforced, not just recorded: `kp-ingest`'s `vendor_pin` test
+recomputes the sha256 of the embedded bytes against `PIN` on every test
+run (so every commit and CI pass) — a silent local edit to a vendored
+schema fails the suite until the PIN is legitimately re-synced.
