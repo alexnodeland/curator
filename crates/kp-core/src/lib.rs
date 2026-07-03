@@ -6,6 +6,11 @@
 //! the documents under `contracts/` are the API; this code conforms to
 //! them, never the other way around.
 
+// kp-core is the contract crate: every public item is API surface and
+// documents itself. `warn` here becomes a hard error under clippy's
+// `-D warnings` in the gate suite.
+#![warn(missing_docs)]
+
 pub mod checksum;
 pub mod config;
 pub mod id;

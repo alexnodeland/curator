@@ -20,7 +20,9 @@ pub enum ConfigError {
     /// The file could not be read.
     #[error("cannot read config {path}: {source}")]
     Io {
+        /// The path that could not be read.
         path: PathBuf,
+        /// The underlying I/O error.
         #[source]
         source: std::io::Error,
     },
@@ -31,7 +33,10 @@ pub enum ConfigError {
     /// Unknown *keys* are tolerated; an unknown *schema* is a different
     /// major and must not be silently reinterpreted.
     #[error("unsupported config schema {found:?} (this binary implements {KP_CONFIG_SCHEMA:?})")]
-    UnsupportedSchema { found: String },
+    UnsupportedSchema {
+        /// The `schema` value found in the file.
+        found: String,
+    },
 }
 
 /// Top-level `kp.toml` model.
@@ -39,16 +44,22 @@ pub enum ConfigError {
 pub struct KpConfig {
     /// Config contract version, e.g. `kp-config/v1`.
     pub schema: String,
+    /// `[vault]` — the markdown corpus root.
     #[serde(default)]
     pub vault: VaultConfig,
+    /// `[index]` — the embedded index database.
     #[serde(default)]
     pub index: IndexConfig,
+    /// `[curio]` — the Curio producer seam.
     #[serde(default)]
     pub curio: CurioConfig,
+    /// `[zotero]` — the Zotero producer seam.
     #[serde(default)]
     pub zotero: ZoteroConfig,
+    /// `[librarian]` — deterministic digest tuning.
     #[serde(default)]
     pub librarian: LibrarianConfig,
+    /// `[mcp]` — the one MCP entrypoint.
     #[serde(default)]
     pub mcp: McpConfig,
 }
@@ -196,6 +207,7 @@ pub fn secret_with(var_name: &str, get: impl Fn(&str) -> Option<String>) -> Opti
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VaultConfig {
+    /// Vault root directory (`~` expands to the home directory).
     pub path: String,
     /// Relative to the vault.
     pub proposals_dir: String,
@@ -214,10 +226,13 @@ impl Default for VaultConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IndexConfig {
+    /// Path of the `index.db` file (`~` expands to the home directory).
     pub path: String,
     /// `builtin` = in-process pinned CPU ONNX; `hash` = deterministic test embedder.
     pub embedder: String,
+    /// Target chunk size, in tokens.
     pub chunk_tokens: u32,
+    /// Overlap between adjacent chunks, in tokens.
     pub chunk_overlap: u32,
 }
 
@@ -236,6 +251,7 @@ impl Default for IndexConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CurioConfig {
+    /// Whether the Curio producer is active.
     pub enabled: bool,
     /// Tail target for `curio.events.v1` JSONL (rotation-aware cursors).
     pub events_dir: String,
@@ -257,12 +273,17 @@ impl Default for CurioConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ZoteroConfig {
+    /// Whether the Zotero producer is active.
     pub enabled: bool,
+    /// Zotero Web API base URL.
     pub api_base: String,
+    /// Zotero numeric user id (the library to sync).
     pub user_id: String,
     /// Env var NAME holding the API key — never the key itself.
     pub api_key_env: String,
+    /// Use the WebDAV `.prop`/`.zip` channel when the API lacks fulltext.
     pub webdav_fallback: bool,
+    /// WebDAV base URL for the fallback channel.
     pub webdav_url: String,
 }
 
@@ -297,6 +318,7 @@ pub struct LibrarianConfig {
     pub digest_dir: String,
     /// Recency decay half-life, in days.
     pub half_life_days: u32,
+    /// Maximum number of entries per digest.
     pub top_k: u32,
 }
 
@@ -317,6 +339,7 @@ impl Default for LibrarianConfig {
 pub struct McpConfig {
     /// `stdio` (default) or `http`.
     pub transport: String,
+    /// Bind address for the streamable-HTTP transport.
     pub http_bind: String,
     /// Env var NAME holding the bearer token; required when transport = http.
     pub bearer_token_env: String,

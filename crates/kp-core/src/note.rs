@@ -24,7 +24,9 @@ pub enum NoteError {
     /// The frontmatter block is not valid YAML (or not a YAML mapping).
     #[error("invalid YAML frontmatter in {path}: {source}")]
     Yaml {
+        /// Vault-relative path of the offending note.
         path: String,
+        /// The underlying YAML error.
         #[source]
         source: serde_yaml::Error,
     },
@@ -32,13 +34,18 @@ pub enum NoteError {
     /// to kp-note/v1 (bad id namespace, bad checksum, missing title, ...).
     #[error("frontmatter in {path} is not valid kp-note/v1: {source}")]
     Contract {
+        /// Vault-relative path of the offending note.
         path: String,
+        /// The underlying deserialization error.
         #[source]
         source: serde_yaml::Error,
     },
     /// Frontmatter opened with `---` but never closed.
     #[error("unterminated frontmatter block in {path}")]
-    Unterminated { path: String },
+    Unterminated {
+        /// Vault-relative path of the offending note.
+        path: String,
+    },
 }
 
 /// The `kp-note/v1` frontmatter block.
@@ -110,6 +117,7 @@ pub enum Frontmatter {
 pub struct Note {
     /// Vault-relative path, forward slashes (e.g. `curio/some-article.md`).
     pub rel_path: String,
+    /// The parsed frontmatter block (or [`Frontmatter::None`]).
     pub frontmatter: Frontmatter,
     /// The markdown body (everything after the closing `---`, or the whole
     /// file when there is no frontmatter).

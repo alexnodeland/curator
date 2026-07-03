@@ -31,8 +31,11 @@ pub struct Proposal {
     pub created: String,
     /// `kp-librarian` or an agent-supplied name.
     pub author: String,
+    /// Human-readable proposal title.
     pub title: String,
+    /// Why the change is proposed — shown at review time.
     pub rationale: String,
+    /// Lifecycle state, stamped by apply/reject.
     pub status: ProposalStatus,
     /// Vault-relative paths touched by `changes.patch`.
     pub files: Vec<String>,
@@ -43,8 +46,11 @@ pub struct Proposal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProposalStatus {
+    /// Awaiting human review.
     Open,
+    /// Applied to the vault.
     Applied,
+    /// Rejected at review.
     Rejected,
 }
 
@@ -83,7 +89,12 @@ pub enum ProposalWriteError {
     /// The edit reaches inside Curio's machine surface — the managed
     /// region or Curio-owned frontmatter keys (contract hard-reject 2).
     #[error("curio-owned content edit rejected in {path}: {reason}")]
-    CurioOwnedEdit { path: String, reason: String },
+    CurioOwnedEdit {
+        /// Vault-relative path of the rejected edit.
+        path: String,
+        /// Which Curio-owned surface the edit reached into.
+        reason: String,
+    },
     /// The proposed content is byte-identical to the existing file.
     #[error("proposed content is identical to the existing file: {0}")]
     NoChange(String),
@@ -275,17 +286,29 @@ fn frontmatter_map(fm: &Frontmatter) -> serde_yaml::Mapping {
 pub enum ProposalStoreError {
     /// No proposal directory (or file) with this id.
     #[error("no proposal {id} under {proposals_dir}")]
-    NotFound { proposals_dir: String, id: String },
+    NotFound {
+        /// Vault-relative proposals directory that was searched.
+        proposals_dir: String,
+        /// The proposal id that was not found.
+        id: String,
+    },
     /// `proposal.json` is not valid `proposals/v1` JSON.
     #[error("malformed proposal.json for {id}: {source}")]
     Malformed {
+        /// The proposal id whose `proposal.json` failed to parse.
         id: String,
+        /// The underlying JSON error.
         #[source]
         source: serde_json::Error,
     },
     /// The stored `schema` value is not `proposals/v1`.
     #[error("proposal {id} declares unsupported schema {found:?}")]
-    UnsupportedSchema { id: String, found: String },
+    UnsupportedSchema {
+        /// The proposal id.
+        id: String,
+        /// The `schema` value found in its `proposal.json`.
+        found: String,
+    },
     /// Vault access failed.
     #[error(transparent)]
     Vault(#[from] VaultError),

@@ -29,7 +29,9 @@ pub enum VaultError {
     /// An underlying filesystem error.
     #[error("vault I/O on {path}: {source}")]
     Io {
+        /// The path the operation touched.
         path: PathBuf,
+        /// The underlying I/O error.
         #[source]
         source: std::io::Error,
     },
@@ -44,7 +46,12 @@ pub enum VaultError {
     Traversal(String),
     /// The path resolves (via symlinks) outside the vault root.
     #[error("path escapes the vault via symlink: {rel} -> {resolved}")]
-    SymlinkEscape { rel: String, resolved: PathBuf },
+    SymlinkEscape {
+        /// The vault-relative path as requested.
+        rel: String,
+        /// Where it actually resolved, outside the root.
+        resolved: PathBuf,
+    },
     /// The note file failed to parse.
     #[error(transparent)]
     Note(#[from] NoteError),
