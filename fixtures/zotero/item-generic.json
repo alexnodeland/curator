@@ -1,0 +1,27 @@
+{
+  "key": "KEYPODC1",
+  "version": 44,
+  "library": { "type": "user", "id": 777, "name": "fixture" },
+  "meta": { "numChildren": 0 },
+  "data": {
+    "key": "KEYPODC1",
+    "version": 44,
+    "itemType": "podcast",
+    "title": "Episode 12: Markdown Forever",
+    "creators": [
+      { "creatorType": "podcaster", "firstName": "Iris", "lastName": "Chen" }
+    ],
+    "abstractNote": "",
+    "seriesTitle": "Durable Formats",
+    "episodeNumber": "12",
+    "audioFileType": "mp3",
+    "runningTime": "42:00",
+    "url": "https://podcasts.example.test/durable-formats/12",
+    "date": "",
+    "tags": [],
+    "collections": [],
+    "relations": {},
+    "dateAdded": "2026-06-27T20:00:00Z",
+    "dateModified": "2026-06-27T20:00:00Z"
+  }
+}

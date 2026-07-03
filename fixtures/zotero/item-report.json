@@ -1,0 +1,27 @@
+{
+  "key": "KEYRPRT1",
+  "version": 43,
+  "library": { "type": "user", "id": 777, "name": "fixture" },
+  "meta": { "numChildren": 0 },
+  "data": {
+    "key": "KEYRPRT1",
+    "version": 43,
+    "itemType": "report",
+    "title": "State of Personal Knowledge Tooling",
+    "creators": [
+      { "creatorType": "author", "name": "Plain Text Working Group" }
+    ],
+    "abstractNote": "An annual survey of local-first note systems.",
+    "reportNumber": "TR-2026-04",
+    "reportType": "Technical report",
+    "institution": "Institute for Durable Software",
+    "place": "",
+    "date": "2026-04",
+    "url": "https://ids.example.test/reports/tr-2026-04",
+    "tags": [ { "tag": "local-first", "type": 1 } ],
+    "collections": [],
+    "relations": {},
+    "dateAdded": "2026-06-28T09:00:00Z",
+    "dateModified": "2026-06-28T09:00:00Z"
+  }
+}
