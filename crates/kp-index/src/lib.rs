@@ -9,11 +9,13 @@
 pub mod chunk;
 pub mod db;
 pub mod embed;
+pub mod epoch;
 pub mod error;
 pub mod search;
 
 pub use chunk::{Chunk, ChunkParams, chunk_text};
 pub use db::{Index, IndexMeta, IndexReader, SCHEMA_VERSION};
 pub use embed::{Embedder, HashEmbedder};
+pub use epoch::{EpochReport, build_epoch};
 pub use error::IndexError;
 pub use search::SearchHit;
