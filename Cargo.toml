@@ -50,10 +50,25 @@ tracing = "0.1"
 # that builds on stable 1.94.
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlite-vec = "0.1.9"
+# The official Rust MCP SDK — pinned EXACTLY: the MCP surface v1 tool
+# router and transports are written against this API revision; bump
+# deliberately, with the round-trip tests as the gate.
+rmcp = { version = "=2.1.0", default-features = false }
+# rmcp generates tool input/output JSON Schemas via schemars 1.x.
+schemars = "1"
+tokio = { version = "1", default-features = false }
+# Serves rmcp's streamable-HTTP tower service + the bearer-auth layer.
+axum = { version = "0.8", default-features = false }
+# Sortable proposal ids (proposals/v1: the ULID is also the dir name).
+ulid = "1"
+# Unified diffs for proposals/v1 `changes.patch` rendering.
+similar = "3"
 
 # Dev-only.
 proptest = "1"
 tempfile = "3"
+tower = "0.5"
+http-body-util = "0.1"
 
 [workspace.lints.rust]
 # Relax to a scoped `deny` + local `allow` ONLY if sqlite-vec FFI registration

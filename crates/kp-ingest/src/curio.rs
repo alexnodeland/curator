@@ -30,10 +30,10 @@ pub const CURIO_MANIFEST_SCHEMA: &str = "curio.manifest.v1";
 /// The `schema` envelope value of one events-log line.
 pub const CURIO_EVENTS_SCHEMA: &str = "curio.events.v1";
 
-/// Managed-region opening marker (v1).
-pub const MANAGED_BEGIN: &str = "<!-- curio:managed:begin v1 -->";
-/// Managed-region closing marker.
-pub const MANAGED_END: &str = "<!-- curio:managed:end -->";
+// Managed-region markers (v1) — the canonical definitions moved to
+// kp-core (the proposals/v1 write primitive guards on them too);
+// re-exported here so adapter callers keep one import path.
+pub use kp_core::managed::{MANAGED_BEGIN, MANAGED_END};
 
 /// Vendored schema bytes — the pinned boundary (see `contracts/vendor/curio/PIN`).
 const FRONTMATTER_SCHEMA_JSON: &str =

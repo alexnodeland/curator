@@ -9,13 +9,15 @@
 pub mod checksum;
 pub mod config;
 pub mod id;
+pub mod managed;
 pub mod note;
 pub mod proposal;
+pub mod time;
 pub mod vault;
 
 pub use checksum::{Checksum, ChecksumError};
 pub use config::{ConfigError, KpConfig};
 pub use id::{IdError, KpId};
 pub use note::{Frontmatter, Note, NoteError, NoteFrontmatter};
-pub use proposal::{Proposal, ProposalStatus};
+pub use proposal::{Proposal, ProposalFile, ProposalStatus, ProposalWriteError, create_proposal};
 pub use vault::{Vault, VaultError};
