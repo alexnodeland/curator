@@ -66,6 +66,19 @@ impl fmt::Display for KpId {
     }
 }
 
+impl serde::Serialize for KpId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KpId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +118,60 @@ mod tests {
     fn rejects_empty_identifier() {
         let err = "curio:".parse::<KpId>().unwrap_err();
         assert_eq!(err, IdError::EmptyIdentifier("curio".to_owned()));
+    }
+
+    #[test]
+    fn serde_round_trips_as_a_string() {
+        let id: KpId = "zotero:AB2C3DEF".parse().expect("parses");
+        let json = serde_json::to_string(&id).expect("serialize");
+        assert_eq!(json, "\"zotero:AB2C3DEF\"");
+        let back: KpId = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(id, back);
+    }
+
+    /// Any non-empty identifier in any namespace — including identifiers
+    /// containing further colons, slashes, unicode — must survive
+    /// format -> parse unchanged. This is the identity round-trip the
+    /// whole index keys on.
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_kp_id() -> impl Strategy<Value = KpId> {
+            let ident = proptest::string::string_regex(".{1,64}")
+                .expect("valid regex")
+                .prop_filter("identifier must be non-empty", |s| !s.is_empty());
+            (0..4u8, ident).prop_map(|(ns, id)| match ns {
+                0 => KpId::Curio(id),
+                1 => KpId::Zotero(id),
+                2 => KpId::Kp(id),
+                _ => KpId::Path(id),
+            })
+        }
+
+        proptest! {
+            #[test]
+            fn format_then_parse_round_trips(id in arb_kp_id()) {
+                let formatted = id.to_string();
+                let parsed: KpId = formatted.parse().expect("formatted ids must parse");
+                prop_assert_eq!(parsed, id);
+            }
+
+            #[test]
+            fn parse_then_format_is_identity_on_valid_strings(
+                ns in prop_oneof![Just("curio"), Just("zotero"), Just("kp"), Just("path")],
+                ident in ".{1,64}",
+            ) {
+                prop_assume!(!ident.is_empty());
+                let raw = format!("{ns}:{ident}");
+                let parsed: KpId = raw.parse().expect("valid ids must parse");
+                prop_assert_eq!(parsed.to_string(), raw);
+            }
+
+            #[test]
+            fn arbitrary_strings_never_panic(s in ".{0,64}") {
+                let _ = s.parse::<KpId>();
+            }
+        }
     }
 }
