@@ -170,17 +170,21 @@ pub fn create_proposal(
     Ok(proposal)
 }
 
-/// Reject `.curio/**` (contract) and any other dot-directory-rooted path
-/// (stricter, see [`ProposalWriteError::DotPath`]). [`Vault::resolve`]
-/// covers absolute/traversal/symlink shapes separately. Public: the
-/// apply-side validator (kp-librarian) enforces the same policy on
-/// proposals it did not create.
+/// Reject `.curio/**` (contract) and any path with a dot-named component
+/// at ANY depth (stricter, see [`ProposalWriteError::DotPath`]).
+/// [`Vault::resolve`] covers absolute/traversal/symlink shapes
+/// separately. Public: the apply-side validator (kp-librarian) enforces
+/// the same policy on proposals it did not create.
+///
+/// Every component is checked, not just the first: the vault walker
+/// skips dot-named entries at every depth, so a nested dot path (e.g.
+/// `notes/.trash/x.md`) would be a plane-invisible write — indexed by
+/// nothing, audited by nothing.
 pub fn validate_target_path(path: &str) -> Result<(), ProposalWriteError> {
-    let first = path.split('/').next().unwrap_or(path);
-    if first == ".curio" {
+    if path.split('/').next().unwrap_or(path) == ".curio" {
         return Err(ProposalWriteError::CurioPath(path.to_owned()));
     }
-    if first.starts_with('.') {
+    if path.split('/').any(|component| component.starts_with('.')) {
         return Err(ProposalWriteError::DotPath(path.to_owned()));
     }
     Ok(())
@@ -576,6 +580,26 @@ mod tests {
         assert!(matches!(
             create(&[file(".kp/proposals/evil/proposal.json", "{}")]),
             Err(ProposalWriteError::DotPath(_))
+        ));
+        // Dot components are rejected at EVERY depth, not just the first:
+        // the vault walker skips dot-named entries everywhere, so a nested
+        // dot path would be a plane-invisible write.
+        for nested in [
+            "notes/.trash/exfil.md",
+            "a/b/.hidden/x.md",
+            "notes/.hidden.md",
+        ] {
+            assert!(
+                matches!(
+                    create(&[file(nested, "x")]),
+                    Err(ProposalWriteError::DotPath(_))
+                ),
+                "{nested} must be rejected as a dot path"
+            );
+        }
+        assert!(matches!(
+            create(&[file("notes/.curio/fake.md", "x")]),
+            Err(ProposalWriteError::DotPath(_)),
         ));
         assert!(matches!(
             create(&[file("../escape.md", "x")]),

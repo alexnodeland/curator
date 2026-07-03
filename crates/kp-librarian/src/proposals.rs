@@ -403,6 +403,28 @@ mod tests {
     }
 
     #[test]
+    fn hand_crafted_nested_dot_path_is_rejected() {
+        // The walker/index/audit surface skips dot-named entries at EVERY
+        // depth, so a nested dot path would be a plane-invisible write —
+        // the validator must reject it wherever the dot component sits.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        plant_proposal(
+            &vault,
+            "01EEEEEEEEEEEEEEEEEEEEEEEE",
+            &["notes/.trash/exfil.md"],
+            "--- /dev/null\n+++ b/notes/.trash/exfil.md\n@@ -0,0 +1,1 @@\n+hidden\n",
+        );
+        let err =
+            apply_proposal(&vault, ".kp/proposals", "01EEEEEEEEEEEEEEEEEEEEEEEE").unwrap_err();
+        assert!(
+            matches!(err, ApplyError::Rejected { ref reason, .. } if reason.contains("dot-directory")),
+            "got {err}"
+        );
+        assert!(!vault.root().join("notes/.trash/exfil.md").exists());
+    }
+
+    #[test]
     fn hand_crafted_traversal_and_undeclared_paths_are_rejected() {
         let dir = tempfile::tempdir().expect("tempdir");
         let vault = tmp_vault(dir.path());
