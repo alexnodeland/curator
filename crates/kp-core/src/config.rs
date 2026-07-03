@@ -1,13 +1,38 @@
 //! `kp-config/v1` — `kp.toml` (contract: `contracts/kp-config/v1.md`).
 //!
-//! Rules: the config is versioned via the `schema` key; unknown keys warn,
-//! never fail; secrets are only ever env/keychain indirection — never values
-//! in the file.
+//! Binding rules implemented here:
+//! 1. the config is versioned via the top-level `schema` key;
+//! 2. unknown keys warn (via `tracing`), never fail — a config written for
+//!    a newer minor version must load on an older binary;
+//! 3. secrets only via env/keychain indirection (`*_env` keys name the
+//!    variable) — never secret values in the file.
+
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 /// The `schema` value this crate implements.
 pub const KP_CONFIG_SCHEMA: &str = "kp-config/v1";
+
+/// Errors from loading `kp.toml`.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// The file could not be read.
+    #[error("cannot read config {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The file is not valid TOML or is missing required keys.
+    #[error("invalid kp.toml: {0}")]
+    Parse(#[from] toml::de::Error),
+    /// The `schema` key names a contract this binary does not implement.
+    /// Unknown *keys* are tolerated; an unknown *schema* is a different
+    /// major and must not be silently reinterpreted.
+    #[error("unsupported config schema {found:?} (this binary implements {KP_CONFIG_SCHEMA:?})")]
+    UnsupportedSchema { found: String },
+}
 
 /// Top-level `kp.toml` model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,13 +54,142 @@ pub struct KpConfig {
 }
 
 impl KpConfig {
-    /// Parse a `kp.toml` document.
-    ///
-    /// Unknown keys are ignored (the real loader will surface them as
-    /// warnings — per contract they must never be an error).
-    pub fn from_toml_str(raw: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(raw)
+    /// Load a `kp.toml` file. Unknown keys are logged as warnings and
+    /// otherwise ignored; a wrong `schema` value is an error.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        Self::from_toml_str(&raw)
     }
+
+    /// Parse a `kp.toml` document. Unknown keys warn via `tracing` — per
+    /// contract they must never be an error.
+    pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
+        for key in unknown_keys(raw)? {
+            tracing::warn!(key, "unknown kp.toml key ignored (newer config minor?)");
+        }
+        let cfg: Self = toml::from_str(raw)?;
+        if cfg.schema != KP_CONFIG_SCHEMA {
+            return Err(ConfigError::UnsupportedSchema { found: cfg.schema });
+        }
+        Ok(cfg)
+    }
+
+    /// The vault root, tilde-expanded.
+    #[must_use]
+    pub fn vault_path(&self) -> PathBuf {
+        expand_tilde(&self.vault.path)
+    }
+
+    /// The index database path, tilde-expanded.
+    #[must_use]
+    pub fn index_path(&self) -> PathBuf {
+        expand_tilde(&self.index.path)
+    }
+
+    /// The Curio events directory, tilde-expanded.
+    #[must_use]
+    pub fn curio_events_dir(&self) -> PathBuf {
+        expand_tilde(&self.curio.events_dir)
+    }
+}
+
+/// Dotted paths of keys present in `raw` that this config model does not
+/// know. Pure — the loader turns each into a `tracing` warning.
+pub fn unknown_keys(raw: &str) -> Result<Vec<String>, ConfigError> {
+    let doc: toml::Table = toml::from_str(raw)?;
+    // The known key sets mirror the contract's normative example exactly.
+    const TOP: &[&str] = &[
+        "schema",
+        "vault",
+        "index",
+        "curio",
+        "zotero",
+        "librarian",
+        "mcp",
+    ];
+    const TABLES: &[(&str, &[&str])] = &[
+        ("vault", &["path", "proposals_dir"]),
+        (
+            "index",
+            &["path", "embedder", "chunk_tokens", "chunk_overlap"],
+        ),
+        ("curio", &["enabled", "events_dir", "notes_dirs"]),
+        (
+            "zotero",
+            &[
+                "enabled",
+                "api_base",
+                "user_id",
+                "api_key_env",
+                "webdav_fallback",
+                "webdav_url",
+            ],
+        ),
+        (
+            "librarian",
+            &["now_path", "digest_dir", "half_life_days", "top_k"],
+        ),
+        ("mcp", &["transport", "http_bind", "bearer_token_env"]),
+    ];
+    let mut unknown = Vec::new();
+    for key in doc.keys() {
+        if !TOP.contains(&key.as_str()) {
+            unknown.push(key.clone());
+        }
+    }
+    for (table, known) in TABLES {
+        if let Some(toml::Value::Table(t)) = doc.get(*table) {
+            for key in t.keys() {
+                if !known.contains(&key.as_str()) {
+                    unknown.push(format!("{table}.{key}"));
+                }
+            }
+        }
+    }
+    Ok(unknown)
+}
+
+/// Expand a leading `~/` (or bare `~`) against `$HOME`. Non-tilde paths
+/// pass through untouched; an unset `$HOME` leaves the tilde literal
+/// rather than guessing.
+#[must_use]
+pub fn expand_tilde(path: &str) -> PathBuf {
+    match std::env::var_os("HOME") {
+        Some(home) => expand_tilde_with(path, Path::new(&home)),
+        None => PathBuf::from(path),
+    }
+}
+
+/// [`expand_tilde`] against an explicit home — the pure core, for tests.
+#[must_use]
+pub fn expand_tilde_with(path: &str, home: &Path) -> PathBuf {
+    if path == "~" {
+        home.to_owned()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+/// Resolve a secret named by an `*_env` config key: the config holds the
+/// VARIABLE NAME, the environment holds the value. Empty names and unset
+/// or empty variables resolve to `None`.
+#[must_use]
+pub fn secret_from_env(var_name: &str) -> Option<String> {
+    secret_with(var_name, |name| std::env::var(name).ok())
+}
+
+/// [`secret_from_env`] against an explicit lookup — the pure core, for tests.
+pub fn secret_with(var_name: &str, get: impl Fn(&str) -> Option<String>) -> Option<String> {
+    if var_name.is_empty() {
+        return None;
+    }
+    get(var_name).filter(|v| !v.is_empty())
 }
 
 /// `[vault]` — the markdown corpus root.
@@ -112,6 +266,14 @@ pub struct ZoteroConfig {
     pub webdav_url: String,
 }
 
+impl ZoteroConfig {
+    /// The API key, resolved through env indirection.
+    #[must_use]
+    pub fn api_key(&self) -> Option<String> {
+        secret_from_env(&self.api_key_env)
+    }
+}
+
 impl Default for ZoteroConfig {
     fn default() -> Self {
         Self {
@@ -160,6 +322,14 @@ pub struct McpConfig {
     pub bearer_token_env: String,
 }
 
+impl McpConfig {
+    /// The HTTP bearer token, resolved through env indirection.
+    #[must_use]
+    pub fn bearer_token(&self) -> Option<String> {
+        secret_from_env(&self.bearer_token_env)
+    }
+}
+
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
@@ -203,12 +373,85 @@ mod tests {
             mcp: McpConfig::default(),
         };
         assert_eq!(cfg, defaults, "example file drifted from contract defaults");
+        assert_eq!(
+            unknown_keys(raw).expect("parses"),
+            Vec::<String>::new(),
+            "the shipped example must not itself trip unknown-key warnings"
+        );
     }
 
     #[test]
-    fn unknown_keys_never_fail() {
+    fn unknown_keys_never_fail_and_are_reported() {
         let raw = "schema = \"kp-config/v1\"\nfuture_key = true\n\n[vault]\npath = \"/tmp/v\"\nfrom_v2 = 3\n";
         let cfg = KpConfig::from_toml_str(raw).expect("unknown keys must not fail");
         assert_eq!(cfg.vault.path, "/tmp/v");
+        assert_eq!(
+            unknown_keys(raw).expect("parses"),
+            vec!["future_key", "vault.from_v2"]
+        );
+    }
+
+    #[test]
+    fn unknown_schema_is_an_error() {
+        let err = KpConfig::from_toml_str("schema = \"kp-config/v2\"\n").unwrap_err();
+        assert!(matches!(err, ConfigError::UnsupportedSchema { found } if found == "kp-config/v2"));
+    }
+
+    #[test]
+    fn load_reads_a_file_and_expands_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kp.toml");
+        std::fs::write(
+            &path,
+            "schema = \"kp-config/v1\"\n[vault]\npath = \"/srv/vault\"\n",
+        )
+        .expect("write");
+        let cfg = KpConfig::load(&path).expect("loads");
+        assert_eq!(cfg.vault_path(), PathBuf::from("/srv/vault"));
+    }
+
+    #[test]
+    fn load_missing_file_is_io_error() {
+        let err = KpConfig::load("/nonexistent/kp.toml").unwrap_err();
+        assert!(matches!(err, ConfigError::Io { .. }));
+    }
+
+    #[test]
+    fn tilde_expansion() {
+        let home = Path::new("/home/tester");
+        assert_eq!(
+            expand_tilde_with("~/vault", home),
+            PathBuf::from("/home/tester/vault")
+        );
+        assert_eq!(expand_tilde_with("~", home), PathBuf::from("/home/tester"));
+        // Only a LEADING tilde expands; these pass through verbatim.
+        assert_eq!(
+            expand_tilde_with("/abs/path", home),
+            PathBuf::from("/abs/path")
+        );
+        assert_eq!(
+            expand_tilde_with("rel/~/odd", home),
+            PathBuf::from("rel/~/odd")
+        );
+        assert_eq!(
+            expand_tilde_with("~user/vault", home),
+            PathBuf::from("~user/vault")
+        );
+    }
+
+    #[test]
+    fn secret_indirection_reads_the_named_variable() {
+        let env = |name: &str| (name == "KP_TEST_KEY").then(|| "s3cret".to_owned());
+        assert_eq!(secret_with("KP_TEST_KEY", env), Some("s3cret".to_owned()));
+        assert_eq!(secret_with("KP_OTHER", env), None);
+        // Empty variable NAME (config left blank) resolves to nothing.
+        assert_eq!(secret_with("", env), None);
+        // Set-but-empty values are treated as unset.
+        assert_eq!(secret_with("X", |_| Some(String::new())), None);
+    }
+
+    #[test]
+    fn secret_from_env_unset_is_none() {
+        assert_eq!(secret_from_env("KP_DEFINITELY_UNSET_VAR_XYZZY"), None);
     }
 }
