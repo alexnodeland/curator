@@ -94,7 +94,23 @@ Options:
   -h, --help       show this help
   -V, --version    show version";
 
+/// Render library `tracing` events to STDERR (stdout belongs to command
+/// output — and to the MCP protocol under `kp mcp serve`). Without a
+/// subscriber the contract-promised warnings (kp-config/v1: "unknown
+/// keys warn, never fail"; skipped notes; malformed event lines) would
+/// be silently dropped. Default level `warn`; `RUST_LOG` overrides.
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .init();
+}
+
 fn main() -> ExitCode {
+    init_tracing();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("--help" | "-h" | "help") => {

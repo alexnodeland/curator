@@ -48,6 +48,9 @@ sha2 = "0.11"
 thiserror = "2"
 toml = "0.9"
 tracing = "0.1"
+# Binaries only: renders library `tracing` events (contract-promised
+# warnings, e.g. kp-config/v1 unknown-key warnings) to stderr.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 # 0.40 pulls libsqlite3-sys 0.38, whose build script needs the (still
 # unstable on this toolchain) cfg_select! feature; 0.37 is the newest line
 # that builds on stable 1.94.

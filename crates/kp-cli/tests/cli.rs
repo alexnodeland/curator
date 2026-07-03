@@ -274,3 +274,30 @@ fn mcp_serve_http_refuses_without_a_bearer_token() {
         "stderr: {stderr}"
     );
 }
+
+/// kp-config/v1 binding rule 2: "unknown keys warn, never fail". The
+/// warning must be USER-OBSERVABLE — the binary installs a tracing
+/// subscriber, so a typoed section lands on stderr instead of being
+/// silently dropped (a misspelled `[vualt]` means the whole table falls
+/// back to defaults; silence is exactly the failure the rule exists to
+/// surface).
+#[test]
+fn unknown_config_keys_warn_on_stderr_and_do_not_fail() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path());
+    let mut raw = std::fs::read_to_string(&config).expect("read config");
+    raw.push_str("\n[vualt]\npath = \"typo\"\n\n[index2]\nchunk_token = 3\n");
+    std::fs::write(&config, raw).expect("write config");
+
+    let out = kp(&config, &["search", "sqlite", "--json"]);
+    assert!(
+        out.status.success(),
+        "unknown keys must never fail: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown kp.toml key") && stderr.contains("vualt"),
+        "the promised warning must reach stderr, got: {stderr}"
+    );
+}
