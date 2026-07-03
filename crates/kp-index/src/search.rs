@@ -190,7 +190,7 @@ impl IndexReader {
 }
 
 /// Clip to at most `max` chars on a char boundary, with ellipsis.
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }

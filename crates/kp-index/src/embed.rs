@@ -166,6 +166,30 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+/// The embedder named by `[index].embedder` in `kp.toml`: `"builtin"` —
+/// the pinned in-process ONNX model (requires the `embed-onnx` feature) —
+/// or `"hash"`, the deterministic test embedder. The one selection point
+/// every serving surface (CLI batch commands, MCP server) shares, so a
+/// config can never mean two different models in two entrypoints.
+pub fn embedder_from_config(config: &kp_core::KpConfig) -> Result<Box<dyn Embedder>, EmbedError> {
+    match config.index.embedder.as_str() {
+        "hash" => Ok(Box::new(HashEmbedder::default())),
+        #[cfg(feature = "embed-onnx")]
+        "builtin" => Ok(Box::new(crate::embed_onnx::FastEmbedder::from_config(
+            config,
+        ))),
+        #[cfg(not(feature = "embed-onnx"))]
+        "builtin" => Err(EmbedError::Backend {
+            backend: "builtin".to_owned(),
+            message: "this binary was built without the embed-onnx feature".to_owned(),
+        }),
+        other => Err(EmbedError::Backend {
+            backend: other.to_owned(),
+            message: "unknown [index].embedder (expected \"builtin\" or \"hash\")".to_owned(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

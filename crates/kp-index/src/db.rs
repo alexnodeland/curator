@@ -117,7 +117,7 @@ pub struct BehaviorStats {
 /// The single writer handle (see module docs for the discipline).
 #[derive(Debug)]
 pub struct Index {
-    conn: Connection,
+    pub(crate) conn: Connection,
     path: PathBuf,
     meta: IndexMeta,
 }
