@@ -110,15 +110,22 @@ pub fn tail_events(
                     report.malformed += 1;
                 }
                 Ok(event) => {
-                    // Dedupe FIRST: replay-idempotency by event_id.
-                    if !index.mark_event_seen(EVENTS_CONSUMER, &event.event_id, &event.ts)? {
+                    // Seen-mark + fold in ONE transaction (dedupe by
+                    // event_id): a crash between the two can never leave
+                    // an event marked seen but unfolded — which every
+                    // retry would then skip as a duplicate.
+                    let delta = fold(&event);
+                    let newly = index.fold_event(
+                        EVENTS_CONSUMER,
+                        &event.event_id,
+                        &event.ts,
+                        delta.as_ref().map(|(kp_id, d)| (kp_id.as_str(), d)),
+                    )?;
+                    if newly {
+                        report.folded += 1;
+                    } else {
                         report.duplicates += 1;
-                        continue;
                     }
-                    if let Some((kp_id, delta)) = fold(&event) {
-                        index.apply_behavior(&kp_id, &delta)?;
-                    }
-                    report.folded += 1;
                 }
             }
         }

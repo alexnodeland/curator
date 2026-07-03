@@ -384,6 +384,9 @@ impl Index {
 
     /// Record an event id as folded. Returns `true` when the id is NEW
     /// (the caller should fold it) and `false` on a replay (skip).
+    ///
+    /// Prefer [`Self::fold_event`] when a behavioral delta accompanies
+    /// the event — it makes the seen-mark and the fold one transaction.
     pub fn mark_event_seen(
         &mut self,
         consumer: &str,
@@ -395,6 +398,33 @@ impl Index {
             params![consumer, event_id, ts],
         )?;
         Ok(n > 0)
+    }
+
+    /// Atomically mark an event seen AND fold its behavioral delta — ONE
+    /// transaction. Returns `true` when the event was new (and any delta
+    /// was folded), `false` on a replay (nothing folded).
+    ///
+    /// The single transaction is the point: as two separate autocommit
+    /// statements, a crash (or busy error) between the seen-mark and the
+    /// fold would leave the event marked seen but never folded — and
+    /// every retry would then skip it as a duplicate, permanently.
+    pub fn fold_event(
+        &mut self,
+        consumer: &str,
+        event_id: &str,
+        ts: &str,
+        delta: Option<(&str, &BehaviorDelta)>,
+    ) -> Result<bool, IndexError> {
+        let tx = self.conn.transaction()?;
+        let newly = tx.execute(
+            "INSERT OR IGNORE INTO seen_events (consumer, event_id, ts) VALUES (?1, ?2, ?3)",
+            params![consumer, event_id, ts],
+        )? > 0;
+        if newly && let Some((kp_id, delta)) = delta {
+            apply_behavior_conn(&tx, kp_id, delta)?;
+        }
+        tx.commit()?;
+        Ok(newly)
     }
 
     /// Prune seen-event ids with `ts` strictly before `before_ts` (RFC 3339
@@ -414,27 +444,7 @@ impl Index {
     /// `read_later` of `None` leave the flag untouched; `activity_ts`
     /// advances `last_activity` monotonically (max of old and new).
     pub fn apply_behavior(&mut self, kp_id: &str, delta: &BehaviorDelta) -> Result<(), IndexError> {
-        self.conn.execute(
-            "INSERT INTO behavior (kp_id, opened_count, starred, read_later, last_activity)
-             VALUES (?1, ?2, COALESCE(?3, 0), COALESCE(?4, 0), ?5)
-             ON CONFLICT(kp_id) DO UPDATE SET
-               opened_count = opened_count + ?2,
-               starred      = COALESCE(?3, starred),
-               read_later   = COALESCE(?4, read_later),
-               last_activity = CASE
-                 WHEN ?5 IS NULL THEN last_activity
-                 WHEN last_activity IS NULL OR last_activity < ?5 THEN ?5
-                 ELSE last_activity
-               END",
-            params![
-                kp_id,
-                delta.opened_delta,
-                delta.starred.map(i64::from),
-                delta.read_later.map(i64::from),
-                delta.activity_ts,
-            ],
-        )?;
-        Ok(())
+        apply_behavior_conn(&self.conn, kp_id, delta)
     }
 
     /// A note's behavioral rollup, if any events have folded into it.
@@ -581,6 +591,36 @@ impl IndexReader {
             .conn
             .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?)
     }
+}
+
+/// The behavior-fold statement, over any connection/transaction (see
+/// [`Index::apply_behavior`] for the semantics).
+fn apply_behavior_conn(
+    conn: &Connection,
+    kp_id: &str,
+    delta: &BehaviorDelta,
+) -> Result<(), IndexError> {
+    conn.execute(
+        "INSERT INTO behavior (kp_id, opened_count, starred, read_later, last_activity)
+         VALUES (?1, ?2, COALESCE(?3, 0), COALESCE(?4, 0), ?5)
+         ON CONFLICT(kp_id) DO UPDATE SET
+           opened_count = opened_count + ?2,
+           starred      = COALESCE(?3, starred),
+           read_later   = COALESCE(?4, read_later),
+           last_activity = CASE
+             WHEN ?5 IS NULL THEN last_activity
+             WHEN last_activity IS NULL OR last_activity < ?5 THEN ?5
+             ELSE last_activity
+           END",
+        params![
+            kp_id,
+            delta.opened_delta,
+            delta.starred.map(i64::from),
+            delta.read_later.map(i64::from),
+            delta.activity_ts,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Shared behavior-rollup lookup (writer and reader connections).
@@ -1098,6 +1138,49 @@ mod tests {
         assert!(
             !idx.mark_event_seen("c", "01BBB", "2026-07-02T00:00:00.000Z")
                 .expect("kept id still dedupes")
+        );
+    }
+
+    #[test]
+    fn fold_event_is_one_seen_mark_plus_fold_and_replays_fold_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        let delta = BehaviorDelta {
+            opened_delta: 1,
+            activity_ts: Some("2026-07-01T10:00:00.000Z".into()),
+            ..Default::default()
+        };
+        assert!(
+            idx.fold_event(
+                "c",
+                "01AAA",
+                "2026-07-01T10:00:00.000Z",
+                Some(("kp:x", &delta))
+            )
+            .expect("first sighting folds")
+        );
+        // The replay neither folds nor increments — and the seen row and
+        // the fold committed TOGETHER (one transaction), so there is no
+        // seen-but-unfolded state to get stuck in.
+        assert!(
+            !idx.fold_event(
+                "c",
+                "01AAA",
+                "2026-07-01T10:00:00.000Z",
+                Some(("kp:x", &delta))
+            )
+            .expect("replay is skipped")
+        );
+        let stats = idx.behavior("kp:x").expect("query").expect("row");
+        assert_eq!(stats.opened_count, 1, "the replay must not double-fold");
+        // Non-behavioral events (no delta) still dedupe.
+        assert!(
+            idx.fold_event("c", "01BBB", "2026-07-01T11:00:00.000Z", None)
+                .expect("mark only")
+        );
+        assert!(
+            !idx.fold_event("c", "01BBB", "2026-07-01T11:00:00.000Z", None)
+                .expect("replay")
         );
     }
 
