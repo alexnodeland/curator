@@ -1,0 +1,426 @@
+[
+ {
+  "findings": [
+   {
+    "severity": "critical",
+    "finding": "Aggregate v1 scope is a second full-time job that collides head-on with Curio's ~28-week commitment. Counting the combined design: 7 packages (kp-core/ingest/index/mcp/zotero/librarian/sync), 3 in-repo MCP servers (RFC-0018 budgeted ONE custom server), ~10 published versioned contracts each with CHANGELOG + drift gate, 2 store backends, 2 librarian harnesses, 2 MCP transports \u00d7 2 protocol versions, 4 CI surfaces (product matrix, vault gate, cross-repo contract job, release train), 3 repos + submodule/PIN/mirror rituals, CT 206 + CT 207 + a 4th agent VM on the oversubscribed pve. What collapses first: the OSS surface \u2014 demo-smoke and cross-repo CI go red the first week Alex is heads-down in Curio, the quickstart promise rots, and the 'distributable' claim dies publicly, which is worse than never making it. Two-year survival test: only components that tolerate a month of zero attention survive; the WebDAV shim, dual CI matrices, RC-pinned MCP SDK, and pin-bump rituals all fail that test.",
+    "fix": "Define KP v1 as the personal-instance spine only (~6-8 weeks of build): Zotero metadata ingest \u2192 embedded index \u2192 kp-vault + kp-retrieval MCP (thin) \u2192 maintenance loop via Claude Code on cron. Everything labeled 'OSS product' (quickstart CI, release engineering, second harness, registry publication, RSS fallback) moves to an explicit Phase 6 'OSS hardening' gated on the instance surviving \u22658 weeks of real use."
+   },
+   {
+    "severity": "critical",
+    "finding": "The design conflates 'distributable' (Alex's actual directive: a system others CAN replicate) with 'launched OSS product' (MCP Registry publication, PyPI + ghcr multi-arch release train, governance docs, market differentiators like 'nobody serves the headless-WebDAV niche', CI-enforced <30-min quickstart on linux+macos). Day-1 product-launch scope for a system with zero external users is the single biggest feasibility landmine \u2014 every duplicated seam (2 drivers, 2 harnesses, 2 transports, 2 OSes) exists only to serve hypothetical strangers.",
+    "fix": "Distributability at v1 = the three-repo split (keep \u2014 it's cheap and correct), no LAN IPs / no house-stack references in product code (keep the litmus grep), pluggable OpenAI-compatible LLM/embedding seam (keep \u2014 it's one config value), and honest docs. Defer all enforcement machinery and dual implementations to the post-instance OSS phase. The 20% that preserves optionality ships now; the 80% that is launch engineering waits."
+   },
+   {
+    "severity": "critical",
+    "finding": "The three sub-designs contradict each other on the graph store and the synthesis cannot proceed without resolving it: distribution says embedded Kuzu default; integration_fabric says drop Kuzu AND LanceDB for relational edge tables in the same SQLite/Postgres store; mcp_agent says Kuzu embedded default + Postgres edges option. Kuzu is a whole extra database dependency whose payoff at personal scale (\u2264100k nodes, one-hop expansion, supports/refutes queries) is zero \u2014 recursive CTEs cover it.",
+    "fix": "Adopt integration_fabric's resolution everywhere: claim/link graph = plain edge tables inside the one index store; Kuzu and LanceDB are both permanently dropped. This also deletes a driver axis from the test matrix."
+   },
+   {
+    "severity": "critical",
+    "finding": "Two full store backends (embedded sqlite-vec+FTS5+edges AND postgres pgvector+tsvector+edges) doubles the index plane, creates the design's own admitted 'one leg rots' CI-matrix risk, and makes Alex's install non-representative of the OSS default (violating his own stated acceptance test). His postgres choice additionally rests on TWO unresolved risks: pgvector presence in the pinned managed-postgres PG15 image is unverified, and the PG15\u219217 migration is one-way and undone \u2014 a Phase 3 stall waiting to happen.",
+    "fix": "Ship the embedded driver ONLY at v1. Alex runs the same embedded store on the pve worker \u2014 the index-service seam the design itself introduces makes this legal. Postgres driver becomes a documented post-v1 profile. This deletes the managed-postgres dependency, the pgvector verification, the PG15\u219217 coupling, and half the index-plane code from the critical path in one cut."
+   },
+   {
+    "severity": "major",
+    "finding": "The versioned HTTP index query API (contract #5) is speculative infrastructure: its only consumer is kp-mcp, and its only purpose is keeping kp-retrieval on G11 while the index lives on pve. But that placement's 'always-on' property is fake \u2014 pve is the reboot-freely host, so every retrieval query dies with pve anyway; a stateless MCP adapter on G11 fronting a dead backend buys nothing. Meanwhile the API becomes a forever-maintained versioned contract.",
+    "fix": "Make the index query API an in-process Python interface. Co-locate kp-retrieval with the index on the pve worker; keep kp-vault + git mirror on G11 (genuinely always-on: vault reads survive pve reboots) and kp-zotero on CT 206. Result: ZERO cross-host data paths anywhere. Flag explicitly as a narrow ADR-0029 amendment (retrieval MCP follows its index; 'MCP on G11' holds for vault + zotero), justified by the evidence above."
+   },
+   {
+    "severity": "major",
+    "finding": "~10 published versioned contracts (kp-note, kp-config, kp-events internal bus, digest-feed, managed-region, tool surface, index query API, proposals convention, interest-model artifact, attachment-cache) each with per-schema CHANGELOG, stable $id URLs, and drift gates \u2014 for a system with exactly one consumer at launch. Every published schema is a forever promise; a solo maintainer will default on most of them. kp-events/v1 is the worst offender: a versioned public event-bus contract for ~3 processes that could call functions.",
+    "fix": "Publish exactly 4: kp-note.v1, kp-config.v1, proposals/v1 branch convention, MCP tool surface. Internalize kp-events (function calls / job queue), the index API, the interest-model artifact, and the attachment cache. digest-feed becomes a docs paragraph ('Atom, stable GUIDs'); managed-region becomes a one-line marker-string reservation in Curio's schema review, not a spec."
+   },
+   {
+    "severity": "major",
+    "finding": "kp-zotero's .prop/.zip WebDAV extraction shim \u2014 cache layout, contract tests, format-probe tripwires, 'headline OSS differentiator' \u2014 is built on an officially-unsupported format that any Zotero release can silently break, i.e., a standing maintenance tax on the component most likely to fail while Alex is deep in Curio. Worse: the design never evaluates Zotero's official full-text content sync channel (extracted fulltext syncs through zotero.org DATA sync independent of file storage; the API serves /items/<key>/fulltext regardless of WebDAV attachment storage). The claim 'only the WebDAV host can serve those bytes' is true for PDF bytes but not for indexable fulltext \u2014 the primary index use case.",
+    "fix": "Verify the /fulltext API channel first (a curl one-liner). If it works, it becomes the primary fulltext path; the WebDAV shim demotes to an on-demand GET+unzip fallback for scanned/unindexed PDFs needing OCR bytes (~30 lines, no cache layer, no published contract), and the 'differentiator' marketing is cut."
+   },
+   {
+    "severity": "major",
+    "finding": "Two librarian harnesses at v1 is fake pluggability at real cost: a provider-neutral OpenAI-compatible agent loop doing discovery-grade judgment on CPU-only local models is a research project, and the design already concedes it ships 'experimental' \u2014 meaning the OSS discovery loop effectively requires Claude anyway while Alex pays for building and CI-exercising a second harness.",
+    "fix": "Harness neutrality lives in the proposals/v1 contract, which the design itself states: 'any harness producing conforming branches is a valid librarian.' Ship the Claude Code adapter as the only supported v1 harness; the neutral runner becomes a contrib/ example. This is the same honest posture as Obsidian-recommended-not-required."
+   },
+   {
+    "severity": "major",
+    "finding": "The discovery loop / interest model (thread vectors, per-claim vectors, source-type priors, exponential decay half-lives, inspectable JSON artifact schema, rendered report, cold-start centroid, event re-rank boosts) is fully specced despite being RFC-0018's own Phase 5 \u2014 'last, since it's only as good as everything beneath it' \u2014 and worthless until the maintenance loop has months of corpus. It is also the component most likely to underdeliver on CPU-only hardware, per ADR-0029's named fallback (reduced cadence/scope).",
+    "fix": "Demote the interest model to a design doc. v1 digest (if any) = a dumb deterministic query: 'new items since last digest whose embeddings match a now.md thread above threshold', composed by the maintenance-loop agent. Build the real model only after digest v0 proves the loop is wanted."
+   },
+   {
+    "severity": "major",
+    "finding": "Curio coupling front-loads work that is mechanically blocked for ~11-14.5 weeks (frontmatter-v1/events-v1 unpublished until Curio Phase 3, W1 private-network allowlist unbuilt, Zengobi trademark unresolved so integration docs can't even name the reader) \u2014 while simultaneously filing 8 asks (negation events, event_id ULID, tags-in-payload, ts/cursor spec, $id registry, W1, W2, W6) that expand Curio's already-honest 28-week estimate. The bidirectional digest\u2192Curio loop is double-blocked (W1 + Atom emitter) and the webhook events receiver adds a new always-on LAN ingest surface for a stream Curio will first ship as a file sink anyway.",
+    "fix": "File the schema review NOW \u2014 it's the one genuinely time-critical, cheap, high-leverage item (keep all 8 findings in the review, but as asks Curio prioritizes, not KP-blocking dependencies). Build the Curio adapter against vendored draft fixtures behind a feature flag. Cut from v1: the webhook receiver (tail the file sink), the Atom digest feed (digest note + push-notifier ping suffices until W1 exists), and the managed-region spec (companion notes are the shipped mechanism)."
+   },
+   {
+    "severity": "major",
+    "finding": "G11 guest sprawl: CT 207 stacks six processes (mirror, kp-vault MCP, kp-retrieval MCP, Atom renderer, webhook receiver, trigger shim) onto a 4C/8T box whose headroom math predates CT 206, the router-fw cutover (VM 200 claims 2c/4GB when routing, cutover window was ~2026-07-01 and unconfirmed), and the existing pihole/push-notifier/caddy/gatus load. The design flags 're-derive headroom' as a risk but still commits the CT.",
+    "fix": "No CT 207. After the retrieval-follows-index move (finding 5) and the v1 cuts (Atom renderer, webhook receiver), what remains for G11 is kp-vault MCP + git mirror \u2014 fold them into CT 206 alongside WebDAV/kp-zotero as one 'kp-access' CT, or a single small new CT only after post-cutover headroom is measured. One new G11 guest, not two."
+   },
+   {
+    "severity": "major",
+    "finding": "The pve Phase 3 precondition ('measure real utilization before committing embedding workload') appears in RFC-0018, ADR-0029, and all three sub-designs' risk lists \u2014 as prose, never as a gate. Meanwhile the design adds a FOURTH agent VM plus OCR + Ollama embedding + indexing to the box whose nominal allocation already exceeds physical RAM, with CPU-only OCR throughput (Docling over a full Zotero PDF library) and embedding throughput completely unbenchmarked.",
+    "fix": "Make it a numeric entry gate: a task that records live pve utilization, OCR docs/hour, and embedding chunks/sec on the chosen models, with go/no-go thresholds, required before any Phase 3 branch merges. Also reuse the existing claude-agent VM with a separate RFC-0013 workspace for the librarian at v1 instead of provisioning a fourth agent guest."
+   },
+   {
+    "severity": "major",
+    "finding": "Unreconciled contradictions between the three sub-designs that the synthesis must resolve or the build inherits them: (a) distribution's kp-mcp lists direct vault 'append/patch' tools while fabric/mcp_agent make propose_* the ONLY write path \u2014 a safety-relevant conflict; (b) status field: removed from frontmatter entirely (distribution, fabric) vs 'KP-owned notes keep frontmatter status' (mcp_agent); (c) events JSONL in git: committed in-vault for Alex (distribution, mcp_agent) vs gitignored always (fabric); (d) schema naming: kp-note.v1 vs kp-frontmatter-v2; (e) package layout: one kp-mcp package vs three mcp-* packages; (f) kp-sync exists only in fabric's layout.",
+    "fix": "Resolve: (a) propose_* is the only write verb, no append/patch tools exist; (b) lifecycle state index-side for ALL notes, uniformly; (c) manifest.json committed, events/ gitignored everywhere including Alex's instance (unbounded append-only JSONL in git is bad hygiene his own design names); (d) one name, kp-note.v1; (e) one kp-mcp package hosting all tool surfaces; (f) mirror/feed/notifier logic folds into kp-core or kp-librarian, no seventh package."
+   },
+   {
+    "severity": "minor",
+    "finding": "kp-note.v1's five-profile system (core / curio-compat-by-delegation / zotero / web / digest) with per-profile validation is schema machinery disproportionate to need \u2014 it exists to formalize what is really 'one schema with optional fields, plus vanilla Curio files validate against the vendored Curio schema'.",
+    "fix": "One kp-note.v1 schema with optional fields (zotero_key, doi, kind, etc.); Curio-owned notes validated against vendored frontmatter-v1 directly. Profiles can be reintroduced at a real major bump if ever needed."
+   },
+   {
+    "severity": "minor",
+    "finding": "Dual MCP protocol support (2025-06-18 stable + 2026-07-28 RC) is a protocol test matrix the mcp_agent design itself flags as a v1 burden \u2014 and the RC finalizes mid-build, so the matrix churns.",
+    "fix": "Pin FastMCP and ship whatever single protocol version the pinned SDK speaks; transport isolation in kp-mcp (already designed) makes a later spec delta one package's problem. No compatibility matrix at v1."
+   },
+   {
+    "severity": "minor",
+    "finding": "Per-commit demo-smoke executing the real quickstart (Ollama model pull + embed + search) on linux AND macos runners is slow, flaky, and expensive \u2014 exactly the job that goes permanently red and gets ignored, taking the 'CI-enforced distributability' story with it.",
+    "fix": "Fast gate uses a deterministic mock embedding endpoint, linux-only. Real-Ollama end-to-end runs as a weekly scheduled job. macOS runners join at the OSS-launch phase, not before."
+   },
+   {
+    "severity": "minor",
+    "finding": "The release train (PyPI + ghcr multi-arch images + schema artifacts + git-cliff + MCP Registry publication) is specced before a single external user exists. Curio's own re-plan is the house's proof that release engineering is the systematically underbudgeted killer (17-23 weeks ballooned to 28 largely on this).",
+    "fix": "Until the OSS phase: git tags + `uvx --from git+...` installs + compose building from source. The release.yml pipeline is written when there is someone to release to."
+   },
+   {
+    "severity": "minor",
+    "finding": "Nine (distribution) vs eight (fabric) vs seven (mcp_agent) RFC-0018 amendment lists executed as in-place edits is process churn on an accepted RFC, and three overlapping amendment sets invite divergence.",
+    "fix": "One companion RFC ('KP distribution & data-path corrections') that supersedes the stale RFC-0018 sections in a single change set, cross-linked; ADR-0029 untouched except the explicit retrieval-follows-index amendment from finding 5."
+   },
+   {
+    "severity": "minor",
+    "finding": "Agent write surface is wider than v1 needs: zotero_add_by_identifier (a Zotero WRITE from an agent-reachable server), and auto-merge machinery for digest branches (even off-by-default it's built code).",
+    "fix": "Zotero MCP is read-only at v1 (flag-gated writes deferred); no auto-merge path exists at v1 \u2014 a human merges every proposals/* branch until the validator has months of history."
+   },
+   {
+    "severity": "minor",
+    "finding": "Two CI dialects (GitHub Actions for product, git-forge Actions for vault gate + instance) plus instance config expressed in three formats (kp.toml, compose overrides, Ansible overlays) \u2014 each seam is small but they compound for one operator.",
+    "fix": "Vault gate workflow generated from the product's vault-template (single source, already designed \u2014 keep); instance repo gets no CI at v1 (it's config + pins); Ansible wiring only for guests the management plane actually manages, compose for the rest."
+   }
+  ],
+  "must_fix": [
+   "Resequence into a gated phase plan: v1 = personal-instance spine (Zotero metadata ingest, embedded index, thin kp-vault + kp-retrieval + kp-zotero MCP surfaces, maintenance loop on Claude Code, human-merged proposals) targeted at ~6-8 weeks alongside Curio; Curio adapter phase when Curio Phase 3 publishes contracts (~Q4 2026); OSS-hardening phase (quickstart CI, release train, second harness, registry, RSS fallback, macOS CI) gated on \u22658 weeks of instance survival. Distributability at v1 = repo hygiene + seams + the no-house-stack litmus, not dual implementations.",
+   "One store backend: embedded sqlite-vec + FTS5 + relational edge tables. Kuzu and LanceDB dropped permanently; Postgres/pgvector becomes a documented post-v1 profile. Alex runs the embedded store on the pve worker \u2014 same code path as the OSS default (satisfying his own representativeness acceptance test) and deleting the unverified-pgvector + PG15\u219217 dependencies from the critical path.",
+   "Index query API is an in-process interface, not a versioned network contract; kp-retrieval co-locates with the index on pve. Flag the explicit narrow ADR-0029 amendment: retrieval MCP follows its index (always-on G11 placement is illusory when the backing index rides the reboot-freely host); kp-vault + mirror stay on G11, kp-zotero stays on CT 206. Result: zero cross-host data paths.",
+   "Published contract count cut to 4 (kp-note.v1, kp-config.v1, proposals/v1 convention, MCP tool surface). kp-events bus, interest-model artifact, attachment cache, index API are internal; digest-feed is a docs convention; managed-region is a one-line marker reservation filed with Curio.",
+   "File the Curio schema review immediately (all 8 items) \u2014 it is the only genuinely time-critical deliverable; build the Curio adapter against vendored draft fixtures behind a feature flag; cut the webhook events receiver (file-sink tail only), the Atom digest feed (digest note + push-notifier until Curio W1 exists), and in-note managed-region enrichment (companion notes only) from v1.",
+   "Verify Zotero's official full-text content sync API (/items/<key>/fulltext) BEFORE any .prop/.zip shim work; if it serves indexable fulltext (it syncs via data sync independent of WebDAV file storage), the shim demotes to a ~30-line on-demand fallback for scanned PDFs and loses its cache layer, published contract, and headline-feature status.",
+   "One librarian harness at v1 (Claude Code); neutrality is guaranteed by the proposals/v1 branch contract ('any harness producing conforming branches is a valid librarian'), with the OpenAI-compatible loop as a documented example, not a supported CI-exercised surface.",
+   "Resolve the inter-design contradictions in one pass: propose_* is the only agent write verb (no vault append/patch tools); lifecycle status index-side for ALL notes; .curio/manifest.json committed but events/ gitignored everywhere including Alex's instance; one schema name (kp-note.v1); one kp-mcp package; no seventh kp-sync package (fold into kp-core/kp-librarian).",
+   "Numeric Phase 3 entry gate on pve (live utilization + OCR docs/hour + embedding chunks/sec with thresholds) as a blocking task, not a risk note; librarian rides the existing claude-agent VM with its own RFC-0013 workspace at v1 instead of a fourth agent guest; no CT 207 \u2014 surviving G11 pieces (kp-vault MCP + mirror) fold into CT 206 or wait for post-router-fw-cutover headroom measurement."
+  ],
+  "should_cut": [
+   "Postgres/pgvector store driver (defer to post-v1 profile; deletes managed-postgres coupling, pgvector verification, PG15\u219217 risk)",
+   "Kuzu and LanceDB (drop permanently \u2014 relational edge tables in the one store)",
+   "OpenAI-compatible neutral librarian runner as a supported v1 surface (demote to contrib/example)",
+   "Discovery loop + interest model (thread/claim vectors, priors, decay, artifact schema, report renderer) \u2014 design doc only until the maintenance loop has months of corpus; v0 digest = deterministic embedding-match-against-now.md query",
+   "Atom digest feed + Curio subscription loop (double-blocked on Curio W1 and trademark; digest note + push-notifier ping covers Alex)",
+   "Curio webhook events receiver on the LAN (tail the file sink; Curio ships file sink first anyway)",
+   "managed-region/v1 as a spec (reserve the marker string in one doc line inside the Curio schema review; companion notes are the shipped mechanism)",
+   "kp-events/v1 as a published internal-bus contract (internal function calls / job queue)",
+   ".prop/.zip extraction shim as headline feature with cache layout + published attachment-cache contract (on-demand fallback for scanned PDFs only, after fulltext-API verification)",
+   "MCP Registry publication, PyPI packages, ghcr multi-arch images, release.yml pipeline (git tags + uvx-from-git until external users exist)",
+   "Per-commit real-Ollama demo-smoke and macOS CI runners (mock embedder in the fast gate, weekly real job, linux-only until OSS launch)",
+   "Dual MCP protocol version support (pin FastMCP, single protocol version)",
+   "kp-note five-profile schema system (one schema + vanilla vendored-Curio validation)",
+   "Minimal RSS fallback fetcher (defer to the OSS-hardening phase; v1 docs say 'any frontmatter-v1 producer')",
+   "Zotero write tools (zotero_add_by_identifier) and digest auto-merge machinery (read-only Zotero, human merges everything at v1)",
+   "CT 207 as a separate G11 guest and the fourth agent VM on pve (fold into CT 206 / reuse claude-agent VM)",
+   "CPU reranker compose profile (cut entirely at v1)",
+   "Nine-item in-place RFC-0018 amendment edits (one companion RFC superseding the stale sections)"
+  ]
+ },
+ {
+  "findings": [
+   {
+    "severity": "critical",
+    "finding": "SELF-CONTRADICTORY SCHEMA FAMILY: the three sections publish three incompatible note contracts. distribution: kp-note.v1, enum `kind` (zotero|web|manual|transcript|rss), bare-hex checksum, status removed everywhere, identity precedence curio_id|zotero_key|checksum. integration_fabric: kp-note/v1 profiles, enum `origin` (zotero|web|feed|manual), kp_id, 'status is NOT a field anywhere', producer-namespaced note_id. mcp_agent: 'kp-frontmatter-v2', enum source-kind (zotero|web|manual, rss retired), 'KP-owned notes keep frontmatter status', 'prefixed checksum', identity 'path+checksum otherwise'. A synthesis that samples from all three ships a contract that disagrees with itself on the four load-bearing fields (status presence, checksum format, enum name+values, identity key) \u2014 every consumer (proposals gate, index, adapter, Curio cross-repo CI) then validates different documents.",
+    "fix": "Adopt integration_fabric's variant verbatim as the single contract: kp-note/v1 profile family, enum `origin` (zotero|web|feed|manual \u2014 keep transcript if the transcript driver ships v1), bare-hex sha256, no status field in ANY profile, producer-namespaced note_id (curio:<uuid7>|zotero:<itemKey>|kp:<uuid7>). Delete 'kp-frontmatter-v2', delete 'KP-owned notes keep frontmatter status', delete the checksum-in-identity precedence. One name, one enum, stated once."
+   },
+   {
+    "severity": "critical",
+    "finding": "CHECKSUM AS IDENTITY = SILENT NOTE MERGING: distribution's identity precedence 'curio_id | zotero_key | checksum' uses body-checksum as the identity key for manual/web notes. Two distinct notes with identical normalized bodies \u2014 template-created stubs, empty capture notes, duplicated boilerplate \u2014 collapse into one index identity: one note's index rows are overwritten by the other's, one file becomes permanently invisible to search_hybrid/get_note with zero error. mcp_agent's 'path+checksum' variant instead breaks identity on every rename. Both are corrupt identity schemes.",
+    "fix": "Identity is never derived from content or path: mint kp:<uuid7> into frontmatter at ingest for every KP-authored note (kp_id field, integration_fabric already has it). checksum is exclusively a change token; path is exclusively a location. Gate check: reject any proposal introducing a note whose identity field is absent or duplicates an existing identity in main or any open proposal branch."
+   },
+   {
+    "severity": "critical",
+    "finding": "QUARANTINE-BY-FILE-MOVE VIOLATES CURIO MANIFEST OWNERSHIP: integration_fabric contract (consumed #1) says schema-major mismatch \u2192 'quarantine dir + notifier alert'. But Curio-major-mismatch notes live IN the vault, written by Curio and listed in .curio/manifest.json. The KP moving (or otherwise touching) a manifest-listed file breaks Curio's curio_id\u2192path tracking, corrupts the wipe-and-reinstall reconcile (Curio re-promotes \u2192 duplicate note with slug suffix), and is precisely the ownership violation the design elsewhere forbids. Same bug class if quarantine lands inside the vault for KP-fetched payloads: quarantined garbage enters the canonical repo.",
+    "fix": "Quarantine for anything already in the vault is an index-side skip flag (note_id \u2192 quarantined, reason, schema_version seen) plus alert \u2014 never a file operation. File-based quarantine dirs exist only outside the vault, for KP-fetched external payloads (webhook bodies, WebDAV extracts, web clips pre-write)."
+   },
+   {
+    "severity": "critical",
+    "finding": "OWNERSHIP GATE READS THE WRONG MANIFEST: the vault-repo CI gate validates 'zero diffs on manifest-listed (Curio-owned) paths' but doesn't specify which manifest. If it reads the proposal branch's copy, a single malicious-or-buggy librarian branch that deletes a manifest entry AND edits that Curio note in the same diff passes the gate \u2014 the ownership oracle is attacker-editable in the same change it's guarding. The KP then clobbers a Curio-owned note; Curio's next re-promotion clobbers back; both writers silently destroy each other's content.",
+    "fix": "Gate resolves ownership from the merge-base/main-side .curio/manifest.json, and additionally hard-rejects ANY proposals-branch diff under .curio/** (agents have no business there, ever). Add a fixture test: branch that edits manifest + owned note must fail."
+   },
+   {
+    "severity": "critical",
+    "finding": "FRONTMATTER-ONLY EDITS NEVER REINDEX: checksum is sha256 of normalized BODY (Curio's definition, adopted by the KP), and both incremental reindex and the 'periodic full checksum sweep' key on it. Alex retagging a note in Obsidian, fixing a title, adding a doi \u2014 body unchanged \u2192 checksum unchanged \u2192 index row (including the tags used by search_hybrid filters{origin,tags,date}) is stale FOREVER; the safety-net sweep is blind to the same class by construction. Silent, unbounded metadata drift between canonical vault and derived index.",
+    "fix": "Index rows carry two hashes: the contract body-checksum (change token, Curio-opaque) and an internal full-file hash (frontmatter+body) computed by kp-index. Incremental diff and the sweep compare the full-file hash; body-checksum remains only the cross-system contract field. Frontmatter-only change \u2192 metadata-row update without re-embedding (cheap path)."
+   },
+   {
+    "severity": "critical",
+    "finding": "EVENT REPLAY STORY IS PHYSICALLY IMPOSSIBLE ON ALEX'S INSTANCE: the design claims 'file sink retained for replay/backfill' behind the CT 207 webhook receiver. But the file sink is written by Curio desktop ON THE MAC, into .curio/events/ which is GITIGNORED \u2014 it never reaches the mirror, G11, or pve by any path. Webhook receiver downtime (CT 207 reboot, caddy cert flap, network cutover \u2014 the router-fw window is scheduled NOW) = a permanent gap in the event stream; the advertised backfill source is on a different machine with no transport. Interest model and promoted-event triggers silently under-count with no error.",
+    "fix": "Ship `kp events replay --since <cursor>` as a Mac-side CLI that re-POSTs from the local file sink to the receiver, idempotent via event_id (see schema-review finding); receiver persists last-contiguous-cursor and exposes a gap metric so missing ranges are detected, not inferred. Until event_id exists, dedupe on sha256(raw JSONL line)."
+   },
+   {
+    "severity": "critical",
+    "finding": "TORN NOTE+MANIFEST PAIRS UNDER GIT AUTOMATION: Curio's atomic tmp+rename covers each FILE, but a promotion writes TWO files (the note and .curio/manifest.json) non-atomically as a pair. kp-sync's 'optional vault autocommit watcher' (and any Mac-side sync cron) can commit/stash/push between the two writes \u2192 canonical git history contains states where the manifest lists a path with no file, or a note exists unmanifested. Downstream: wipe-and-reinstall reconcile mis-fires (duplicate notes with slug suffixes), the ownership gate mis-classifies the unmanifested note as KP-writable, and the mirror indexes a note whose ownership flips one commit later. Separately, .curio/manifest.json is a single JSON document: any two-writer or synced-vault scenario (Curio's own roadmap documents 'two-machines-one-synced-vault') produces git merge conflicts JSON cannot union-merge \u2014 a mis-merged manifest corrupts the ownership oracle for BOTH systems.",
+    "fix": "Autocommit watcher must quiesce before committing: manifest mtime stable \u2265N seconds AND every manifest entry resolves to an existing file AND no .tmp files under destination dirs; otherwise defer. File Curio schema-review asks: (a) specify write ordering (note fsync'd first, manifest second) and a manifest generation counter; (b) make the manifest a mergeable format (sorted-key JSON with one-entry-per-line, or JSONL) so git conflicts are line-scoped and mechanically resolvable. Vault main-push CI treats manifest-entry-without-file as a hard error."
+   },
+   {
+    "severity": "critical",
+    "finding": "MIRROR FREEZE + INVALID COMMIT-RANGE DIFFS: kp-sync's G11 mirror uses 'webhook-triggered pull + cron fallback'. `git pull` on a worktree diverges and fails silently after any vault-main history rewrite (the house squash ritual makes rewrites a way of life); the mirror then freezes at old HEAD while the 'periodic checksum sweep' reconciles index-vs-MIRROR \u2014 a frozen mirror passes the sweep clean, so retrieval serves stale data indefinitely with index_status reporting healthy. Same event: vault.updated{old,new} \u2192 `git diff old..new` is wrong or errors when old is not an ancestor (force-push, rebase) \u2192 reindex silently skips the delta.",
+    "fix": "Mirror sync is `git fetch --prune && git reset --hard origin/main` (mirror semantics, never pull/merge). index_status must include mirror-HEAD vs `git ls-remote` remote-HEAD lag as a first-class staleness signal. vault.updated handler: if old is not an ancestor of new (merge-base check), abandon incremental and schedule a full sweep automatically."
+   },
+   {
+    "severity": "major",
+    "finding": "EVENT/DATA CAUSALITY RACE: the maintenance loop wakes on Curio's `promoted` webhook, but the promoted note reaches the index only after Mac-side commit+push+mirror-sync \u2014 unbounded time later. As designed, the loop wakes, drains the mirror, finds nothing, and the event is consumed (cursor advanced); the note arrives later with no trigger and waits for the next cron. Promoted articles \u2014 the highest-value signal \u2014 get the WORST indexing latency, and if cron is ever event-gated, they're missed entirely.",
+    "fix": "Events are hints, never completion records: on promoted-event with no matching curio_id in the mirror, enqueue a pending-expectation (curio_id, deadline) that retries on subsequent vault.updated events and alerts on expiry. The mirror diff remains the sole ingest source of truth."
+   },
+   {
+    "severity": "major",
+    "finding": "ZOTERO DELETIONS NEVER OBSERVED: kp-zotero polls `items?since=<Last-Modified-Version>` for metadata deltas. The Zotero Web API reports deletions ONLY via the separate /deleted?since=<version> endpoint, which no section mentions. The metadata cache accumulates ghost items forever: literature stubs proposed for deleted items, index rows and graph edges pointing at nothing, get_fulltext failures on items whose attachments were purged from WebDAV.",
+    "fix": "Poll /deleted?since alongside items?since in the same cycle; write tombstones into the cache; propagate: drop index rows/edges for the zotero:<key> identity, and raise a PROPOSAL flagging the human-grown literature note as orphaned (never auto-delete \u2014 the note body is canonical)."
+   },
+   {
+    "severity": "major",
+    "finding": "WEBDAV PAIR NON-ATOMICITY POISONS THE FULLTEXT CACHE PERMANENTLY: Zotero uploads KEY.zip and KEY.prop as two independent WebDAV PUTs; nginx dav can also leave a truncated .zip at the final path on client disconnect. The extraction shim keys the derived cache on the .prop hash \u2014 if it reads a fresh .prop while the .zip is mid-upload/truncated/previous-generation, it caches wrong or truncated fulltext UNDER THE NEW PROP HASH, and because the key now matches, it never re-extracts. Corrupt fulltext flows into OCR/chunking/embedding and is unrecoverable without manual cache surgery.",
+    "fix": "Shim must (a) verify zip central-directory + CRC integrity before extraction, (b) defer+retry with backoff on any mismatch or a .prop newer than its .zip mtime window, (c) cache only on verified extraction, (d) surface persistent pair-mismatch as the existing orphan-corruption signal. Configure nginx client_body temp path so partial PUTs never land at final paths."
+   },
+   {
+    "severity": "major",
+    "finding": "CITEKEY DRIFT DUPLICATES CANONICAL LITERATURE NOTES: citekey is the literature-note FILENAME, sourced from BBT's Extra field with a deterministic fallback when absent. The lifecycle 'fallback citekey now \u2192 Alex pins a real BBT key later' (or BBT re-pins on metadata fix) changes the filename handle for the same zotero_key \u2192 the poller proposes a NEW stub at literature/<newkey>.md while the old human-grown note persists \u2192 two canonical files for one item, split annotations, split backlinks.",
+    "fix": "The pipeline keys strictly on zotero:<itemKey>: a citekey change on an item already mapped to a vault path emits a RENAME proposal (git mv + wikilink rewrite) \u2014 never a new stub. Gate check: reject any proposal creating literature/<citekey>.md whose zotero_key already maps to a different path in the index."
+   },
+   {
+    "severity": "major",
+    "finding": "ANNOTATION MANAGED-REGION = TWO WRITERS IN ONE HUMAN-OWNED FILE: mirroring Zotero annotations into a managed region OF the literature note puts an automated writer inside a file Alex edits live in Obsidian. Concrete corruption path: Alex has unpushed edits to the note; an annotation-region update merges remotely; his pull conflicts INSIDE the file; conflict markers sever the kp:begin/kp:end markers; the managed-region integrity gate now blocks Alex's own commits on a file the machine broke. Also unresolved: which write path do region updates use \u2014 direct write violates proposals-only, proposal-per-annotation-change is review fatigue or auto-merge into human-owned files (worse). And 'promoting an annotation copies its text into the body while the mirror persists' double-indexes the same text in the chunker.",
+    "fix": "Cut in-note managed regions from v1 entirely (see should_cut): annotations mirror into a COMPANION note (literature/<citekey>.annotations.md, KP-owned, regenerable, proposal-landed or even index-only) exactly like Curio enrichment. Keep managed-region/v1 as a paper reservation with Curio. Exclude mirrored annotation text from chunking when the identical span exists in the parent body."
+   },
+   {
+    "severity": "major",
+    "finding": "PENDING-PROPOSAL BLINDNESS DUPLICATES STUBS: the librarian reads the mirror (merged main) when deciding what to propose. A stub proposed on run N but not yet human-merged is invisible to run N+1 \u2192 duplicate stub on a second branch \u2192 both merge \u2192 duplicate notes with divergent human growth. Same blindness breaks link-integrity: the gate validates a branch against ITS base, not against the merge result, so two concurrently-valid branches can merge into main with broken wikilinks or colliding paths.",
+    "fix": "Before proposing, the librarian must query open_proposals (the tool already exists) and skip identities present in any open branch. Gate runs in a merge-queue posture: re-validate the branch rebased onto current main immediately before merge, not only at push time. Path-collision check across open proposal branches in the gate."
+   },
+   {
+    "severity": "major",
+    "finding": "NO event_id + UNSPECIFIED ts = UNDEDUPLICATABLE DUAL-SINK STREAM: events-v1 as published is {schema_version, event, article{curio_id,url,title,feed}, ts} \u2014 no event id (the review asks for ULID but the design also plans webhook-primary + file-sink-replay NOW). Webhook retries after receiver-side timeout, plus file-sink replay overlap, double-deliver events; the proposed (ts+curio_id) heuristic key is broken because ts format/granularity is one of the unspecified things. Double-counted promoted/starred events skew interest-model weights silently and re-wake the maintenance loop.",
+    "fix": "Make event_id (ULID) + ts format/ordering + rotation/retention semantics BLOCKING outcomes of the Curio schema review \u2014 the KP's dual-sink architecture must be declared contingent on them, not merely 'degraded' without them. Interim: receiver dedupes on sha256(raw line) with a bounded LRU keyed per curio_id, and the file-sink cursor is (dated filename, line number), never byte offset across rotation. Specify rotation retention \u2265 the max tolerated receiver downtime, with a loud 'cursor beyond retention' error instead of silent skip."
+   },
+   {
+    "severity": "major",
+    "finding": "VAULT MAIN IS UNGUARDED AND THE MAC SYNC RITUAL IS UNDEFINED: all gates run on proposals/*; nothing validates direct pushes to vault main \u2014 which is exactly how Alex's Mac (Curio writes + Obsidian edits + any autocommit/autostash sync) publishes. Concrete loss path: Mac cron does pull --rebase --autostash against a freshly auto-merged digest, stash-pop conflicts write conflict markers INTO canonical notes, autocommit pushes them, the mirror indexes conflict markers as content, and nothing ever alarms. The management plane learned this exact class of lesson (dirty-root/merge-pr memories); the vault repo inherits none of it.",
+    "fix": "(a) Vault repo main-push CI: conflict-marker grep, per-profile frontmatter validation, manifest-consistency check (every manifest entry resolves), managed-region integrity \u2014 report-only alerting is fine (can't reject Alex's history) but it must page. (b) Write the Mac sync ritual into the instance runbook: explicit commit points, never autostash-rebase, Curio-write quiesce before pull (shared logic with the autocommit watcher). (c) The indexer skips-and-alerts on files containing conflict markers rather than embedding them."
+   },
+   {
+    "severity": "major",
+    "finding": "DIGEST NAMESPACE AND AUTO-MERGE CONTRADICTIONS ENABLE AGENT OVERWRITE OF CANONICAL NOTES: distribution puts digests in proposals/digest-YYYY-MM-DD.md; the other two sections put them in digests/YYYY-MM-DD.md; integration_fabric says digest auto-merge is 'off by default' while mcp_agent makes the auto-mergeable digest branch the primary delivery mechanism (and the Atom feed's freshness depends on merge latency). Worse: the path allowlist permits writes to digests/, so a librarian re-run after a partial failure can propose modification of an ALREADY-MERGED, possibly human-annotated digest \u2014 auto-merge turns that into an unreviewed agent overwrite of canonical content.",
+    "fix": "One namespace: digests/YYYY-MM-DD.md on main, branches named proposals/digest-*. Gate makes digests/ CREATE-ONLY (any diff modifying an existing digests/ file is rejected); re-runs are idempotent-by-date and no-op if the date exists. Resolve auto-merge: default OFF in OSS, and on Alex's instance let the Atom renderer read the open digest proposal branch (it's a derived surface \u2014 it may legitimately render unmerged content) so loop latency decouples from merge latency."
+   },
+   {
+    "severity": "major",
+    "finding": "GRAPH-STORE THREE-WAY CONTRADICTION FORKS INDEX SEMANTICS: distribution ships Kuzu embedded as default, integration_fabric explicitly DROPS Kuzu ('a graph DB is a dependency without a payoff') in favor of relational edge tables in both drivers, mcp_agent ships Kuzu default + pg edge tables. If synthesis keeps Kuzu-default/pg-edges-split, the two drivers have different query semantics, different rebuild stories, and epoch metadata that means different things \u2014 the 'instance stays representative' acceptance test is structurally false because Alex's postgres path and the OSS default path exercise different graph engines.",
+    "fix": "Adopt integration_fabric's resolution: relational edge tables (identical logical DDL) in both sqlite and postgres drivers; recursive CTEs cover one-hop expansion and supports/refutes at personal scale. Kuzu is deleted from the design, not made optional."
+   },
+   {
+    "severity": "major",
+    "finding": "EPOCH-BUMP = MULTI-DAY RETRIEVAL OUTAGE: 'on index-meta mismatch the server refuses to serve and offers kp reindex --rebuild' combined with CPU-only embedding on an unbenchmarked corpus means every embedding-model swap or schema-epoch bump takes retrieval hard-down for the full rebuild duration (hours to days on the M5 Ultra). On the postgres driver there is also no stated isolation between the old and new epoch \u2014 an in-place rebuild that fails midway leaves a half-written index that the self-description table may still describe as coherent.",
+    "fix": "Blue/green epochs: rebuild writes to a new schema/namespace (pg) or new index.db file (sqlite) stamped with the new epoch; the query service serves the old epoch until the new one passes a completeness check (note-count + checksum-coverage vs mirror), then flips an alias atomically. Old epoch is dropped only after flip. Mid-rebuild crash = no visible change."
+   },
+   {
+    "severity": "major",
+    "finding": "PER-PRODUCER CHECKSUM SEMANTICS MAKE THE GATE'S 'CHECKSUM CORRECTNESS' CHECK INCOHERENT: the same `checksum` field means 'Curio's normalization, opaque to the KP' on Curio notes and 'KP's documented LF/trim normalization, verifiable' on KP notes. The gate validates 'checksum correctness for KP-produced notes' \u2014 but producer discrimination relies on manifest listing, and a Curio note in its write-then-manifest window (or after a torn-pair commit) is indistinguishable from a KP note \u2192 gate recomputes with the KP algorithm, mismatches Curio's, and rejects a valid branch (or, inverted, skips verification on KP notes). Also invites a future dev to 'fix' verification by reimplementing Curio normalization \u2014 the brittle coupling the risks section warns against.",
+    "fix": "Discriminate by identity namespace, not manifest: curio:* \u2192 checksum is opaque, never recomputed; kp:*/zotero:* \u2192 verify against the documented KP normalization. Document per-producer semantics in kp-note/v1 itself. Gate treats unmanifested notes under Curio destinations with curio:* ids as Curio-owned pending manifest."
+   },
+   {
+    "severity": "major",
+    "finding": "METADATA-BEFORE-ATTACHMENT RACE STRANDS FULLTEXT: zotero.org metadata and WebDAV attachment upload are independent channels; a new item's metadata routinely lands first. The pipeline OCRs 'no attachment yet', proposes a no-fulltext stub, and \u2014 because reindex is checksum-keyed off the NOTE \u2014 the later-arriving attachment changes nothing in the vault, so the fulltext never enters the index. Permanent silent gap for exactly the newest (most digest-relevant) items.",
+    "fix": "The attachment shim emits its own index-invalidate event keyed on zotero:<itemKey> when a new propHash lands; items with metadata-but-no-attachment stay in a pending-retry state (bounded backoff) rather than finalizing; index rows record fulltext-present as a flag so the sweep can reconcile items where cache and index disagree."
+   },
+   {
+    "severity": "minor",
+    "finding": "CURIO RE-PROMOTION CLOBBERS OUT-OF-BAND EDITS TO ITS OWN NOTES: Curio 'updates in place' on re-promotion using the manifest's last checksum; Obsidian plugins (linter/templater) or Alex himself editing a Curio-owned note produce a checksum mismatch Curio's published behavior doesn't specify handling for \u2014 as designed it re-renders the whole file, destroying the edit. KP-side companion notes dodge this for the KP, but nothing protects the human.",
+    "fix": "Add to the Curio schema review (it's already 'consumer #1's' review to file): re-promotion MUST detect on-disk checksum \u2260 manifest checksum and refuse/quarantine instead of overwrite. KP docs + vault main-push CI warn when manifest-listed files drift from their manifest checksum."
+   },
+   {
+    "severity": "minor",
+    "finding": "CITATIONS ROT ON RENAME: retrieval citations are 'note path + heading anchor + checksum-at-index-time' and get baked into merged digest notes (canonical). Renames (manifest-tracked or git mv) invalidate the path; `git diff --name-status` rename detection is heuristic (rename+heavy-edit = delete+add), so even the index's own path bookkeeping can churn identities' locations.",
+    "fix": "Citations in canonical artifacts use wikilink-by-basename (Obsidian-resolution semantics, rename-tolerant) plus note_id; path+checksum stays in the MCP result payload only, labeled as point-in-time."
+   },
+   {
+    "severity": "minor",
+    "finding": "INTEREST-MODEL ARTIFACT LOCATION CONTRADICTS THE CANONICAL/DERIVED RULE AS WRITTEN: integration_fabric calls it a 'versioned YAML artifact (git-diffable, derived)' \u2014 if 'git-diffable' means committed to the vault repo, derived state enters the canonical repo; if it lives in a state dir, 'git-diffable/versioned' is unspecified machinery. mcp_agent separately calls it a JSON artifact + rendered report. Ambiguity invites the derived-in-canonical violation.",
+    "fix": "State dir (outside any git repo) holds the JSON artifact; the human-facing rendered report may ship as a section of the digest note via proposals (canonical once merged, explicitly a snapshot). Delete 'git-diffable' from the artifact's spec or give the state dir its own local git init, never the vault."
+   },
+   {
+    "severity": "minor",
+    "finding": "ZOTERO WRITE TOOL IS A SECOND WRITER INTO A CANONICAL SYSTEM: zotero_add_by_identifier / add_item gives the agent write access to Zotero (canonical) in v1, guarded only by a flag and a staging collection. A librarian bug or prompt injection via ingested content can bulk-write garbage items that then flow back through the metadata poller into stubs \u2014 a canonical-pollution loop with no gate equivalent to the proposals CI.",
+    "fix": "Defer add_item past v1 (see should_cut) or make the staging collection the enforced-only write target server-side (collection id pinned in config, tool rejects everything else) with a human-review-then-move ritual documented; the metadata poller must exclude the staging collection from stub generation."
+   },
+   {
+    "severity": "minor",
+    "finding": "RESIDUAL CROSS-SECTION CONTRACT DRIFT: kp-events/v1 internal bus exists only in integration_fabric (the other sections have no bus but depend on vault.updated semantics); digest GUID format is 'tag:<vault-id>,<date>:digest' in one place and unspecified 'stable tag: URIs' elsewhere; package topology differs (kp-mcp monolith vs three mcp-* packages; kp-sync exists in one section); index self-description is 'index-meta.json' (file) in distribution vs a table in integration \u2014 meaningless for the postgres driver as a file. Each is small; together they guarantee the synthesized spec disagrees with itself somewhere a consumer will notice.",
+    "fix": "Synthesis picks integration_fabric's inventory as the base (it is the most internally consistent), then applies mcp_agent's tool-surface detail and distribution's release/licensing machinery on top; a final single-source contracts table (name, version, owner, location) replaces all three lists."
+   },
+   {
+    "severity": "minor",
+    "finding": "WEBDAV DERIVED CACHE HAS NO GC AND UNBOUNDED GROWTH: attachments/<itemKey>/<propHash>/ accretes one tree per attachment revision forever; deleted items (see /deleted finding) never purge. Disposable, so not corruption \u2014 but a full CT 206 disk IS an ingestion outage on the always-on tier.",
+    "fix": "Keep only the current propHash per itemKey (previous generation removed after successful re-extraction); purge on tombstone; disk-usage alarm on CT 206."
+   }
+  ],
+  "must_fix": [
+   "Collapse the three schema variants into ONE kp-note/v1 contract (integration_fabric's): enum `origin`, bare-hex checksum, NO status field anywhere, producer-namespaced note_id (curio:|zotero:|kp:); delete 'kp-frontmatter-v2', the 'prefixed checksum', and 'KP-owned notes keep status'.",
+   "Ban content-checksum and path from identity: mint kp:<uuid7> at ingest for all non-Curio/non-Zotero notes; gate rejects absent/duplicate identities across main + open proposals.",
+   "Ownership gate reads .curio/manifest.json from merge-base/main, hard-rejects any proposals diff under .curio/**, and quarantine of in-vault files is an index-side skip flag \u2014 never a file move.",
+   "Mirror sync = fetch --prune + reset --hard (never pull); index_status exposes mirror-vs-remote lag; non-fast-forward vault.updated ranges trigger an automatic full sweep; sweep compares full-file (frontmatter+body) hashes so frontmatter-only edits reindex.",
+   "Event integrity package: event_id ULID + ts spec + rotation/retention declared BLOCKING schema-review outcomes; interim sha256(line) dedupe; (filename,line) cursors, never byte offsets; Mac-side `kp events replay` CLI because the file sink cannot otherwise backfill CT 207; events are hints \u2014 promoted-event-before-push race handled via pending-expectations with the mirror diff as sole ingest truth.",
+   "Zotero correctness: consume /deleted?since with tombstone propagation; zip CRC verification before caching keyed on propHash with defer+retry on pair mismatch; citekey changes become rename proposals keyed on zotero_key (gate rejects duplicate zotero_key at a new path); attachment arrival emits its own index-invalidate (metadata-first race).",
+   "Vault main-push CI (conflict-marker grep, schema validation, manifest-entry-resolves check) + a written Mac sync ritual (no autostash-rebase, Curio quiesce before pull); autocommit watcher commits only after note+manifest pair quiesce; file Curio asks for manifest write-ordering and a merge-friendly manifest format.",
+   "Digests: single namespace digests/YYYY-MM-DD.md, gate makes it create-only, re-runs idempotent-by-date; auto-merge default OFF; Atom renderer may read the open proposal branch to decouple loop latency from merges.",
+   "Graph store: relational edge tables in BOTH drivers (identical logical DDL); Kuzu removed from the design entirely.",
+   "Blue/green index epochs: rebuild into a new schema/db file, completeness-check, atomic alias flip \u2014 no refuse-to-serve outage during CPU-only rebuilds, no half-written in-place rebuild state.",
+   "Checksum verification discriminates by identity namespace (curio:* opaque, kp:*/zotero:* verified against documented KP normalization); per-producer semantics written into kp-note/v1.",
+   "Librarian consults open_proposals + index before proposing (no duplicate stubs); gate re-validates branches rebased onto current main at merge time (merge-queue posture) including cross-branch path collisions."
+  ],
+  "should_cut": [
+   "In-note managed regions in v1, including the Zotero annotation mirror into literature notes \u2014 annotations go to KP-owned companion notes; managed-region/v1 stays a paper reservation filed with Curio only.",
+   "Checksum as an identity key (distribution's 'curio_id | zotero_key | checksum' precedence) \u2014 cut outright.",
+   "mcp_agent's 'kp-frontmatter-v2' schema variant (frontmatter status on KP notes, prefixed checksum, path+checksum identity) \u2014 superseded wholesale.",
+   "Kuzu (and any embedded graph-DB driver) \u2014 relational edges in the existing stores cover personal scale.",
+   "zotero add_item / zotero_add_by_identifier agent write tool in v1 \u2014 read-only Zotero access until a staging-collection enforcement + review ritual exists (canonical-system second writer).",
+   "The optional vault autocommit watcher in v1 unless it ships with the quiesce logic \u2014 a naive watcher is the torn-pair generator.",
+   "Digest auto-merge as a default anywhere (keep as an explicitly-enabled, create-only-gated option).",
+   "Byte-offset file-sink cursors \u2014 replaced by (dated filename, line) cursors.",
+   "The 'file sink retained for replay/backfill' claim in its current form \u2014 either ship the replay CLI or stop claiming backfill exists."
+  ]
+ },
+ {
+  "findings": [
+   {
+    "severity": "critical",
+    "finding": "Safe-outputs disposal layer silently requires a git forge. The three-layer safety model (proposals/* branches + branch protection + a separately-credentialed deterministic CI validator that alone may merge) assumes GitHub/git-forge/Gitea with Actions and a second bot identity. The OSS default deployment is explicitly 'watcher-mode with no remote at all' \u2014 in that mode propose_note/propose_patch has no defined behavior (push to what?), the validator has nowhere to run, and the entire 'agent proposes, a different process disposes' security story evaporates. The designs document a degraded mode for weak branch protection but never for the no-forge case, which is the STRANGER'S DEFAULT case. Worse, vault-template ships .github/.git-forge gate workflows, implying a stranger pushes their private personal notes to a forge to get safety \u2014 contradicting the local-first privacy posture.",
+    "fix": "Make local disposal the primary model: `kp propose` writes a local branch (or a staged changeset dir when no git), `kp review`/`kp apply` run the exact same deterministic validator (schema, path allowlist, manifest-owned-path refusal, link integrity) in-process and perform the merge. Forge CI + branch protection becomes optional hardening for remote deployments, documented with the privacy caveat (self-hosted runner or git-forge for private vaults). The validator must be one importable module used identically by CLI and CI."
+   },
+   {
+    "severity": "critical",
+    "finding": "The quickstart's embedding prerequisite is the lie in the <30-min promise. kp-core mandates 'no in-process ML \u2014 embeddings arrive over OpenAI-compatible HTTP', so `just demo` requires the stranger to have installed Ollama AND pulled an embedding model (plus an LLM if they touch the librarian) before minute zero. On NAS-class hardware Ollama may not run at all. The CI demo-smoke job that 'enforces' the promise will either need real Ollama+model-pull on GitHub runners (slow, flaky, permanently red) or will mock the endpoint \u2014 at which point it proves nothing about the stranger's path. Two of the three designs also disagree on the number (<30 min vs 15 min) and neither counts prerequisites (uv, just, docker, Ollama, models, Zotero API key).",
+    "fix": "Ship a default in-process CPU embedding driver (fastembed/ONNX small model, ~90MB, hash-pinned) behind the same embedder interface \u2014 still CPU-only, honors the fleet constraint \u2014 with OpenAI-compatible HTTP as the documented upgrade path. CI caches the pinned model and runs the demo truly end-to-end; the quickstart states ONE measured wall-clock number from a bare runner including model fetch, plus an explicit prerequisites box."
+   },
+   {
+    "severity": "critical",
+    "finding": "Librarian Anthropic-dependence is deferred, not solved. All three designs name Claude Code as the 'reference' adapter and admit the provider-neutral loop is 'experimental' for discovery \u2014 so at v1 the headline feature (proactive digest) de facto requires a Claude subscription, exactly the dependency class the directive forbids. The 'thin provider-neutral OpenAI-compatible tool-loop bridging three MCP servers' is not thin: it is an agent framework (MCP client, tool-call loop, budgets, error recovery) \u2014 a large hidden work item that will be under-invested (the design's own risk list says so).",
+    "fix": "Restructure so the loops need no LLM at all for baseline value: maintenance (OCR route, embed, dedupe-by-threshold, stub-from-metadata) is already deterministic CLI per the design \u2014 commit to that; add a deterministic baseline digest (rank new-since-last-digest by embedding similarity to now.md thread vectors + recency decay \u2014 this is code, the interest model is already deterministic). The agent harness becomes an optional prose-quality enhancer. Cut the openai-loop discovery adapter from v1; document honestly: 'digest works with zero LLM; an agent harness makes it read better.'"
+   },
+   {
+    "severity": "critical",
+    "finding": "Graph-store contradiction with a technical kill. distribution and mcp_agent keep embedded Kuzu as the default graph driver; integration_fabric drops Kuzu for relational edge tables in the same SQLite/Postgres store. Beyond the synthesis conflict: embedded Kuzu does not support safe multi-process concurrent access, and the architecture is multi-process by construction \u2014 MCP clients spawn stdio kp-retrieval processes per session while the indexer daemon writes the same store. sqlite-vec+FTS5+edge tables in one index.db under WAL handles this; Kuzu breaks or forces a serving daemon, destroying the zero-infra story.",
+    "fix": "Adopt integration_fabric's resolution everywhere: drop Kuzu (and LanceDB) entirely; one index.db (sqlite-vec + FTS5 + relational claim/link edge tables via recursive CTEs \u2014 trivially sufficient at \u2264100k nodes); Postgres driver mirrors the same DDL. Update the RFC-0018 graph amendment accordingly."
+   },
+   {
+    "severity": "critical",
+    "finding": "kp-zotero has no local metadata path \u2014 a zotero.org account + API key + cloud metadata sync is a hard dependency of a system marketed 'self-hosted, local-first'. The zotero.sqlite read path was deleted for a reason that is Alex's topology (sqlite never reaches G11), not the stranger's: a single-box user running Zotero on the same machine is the OSS common case and gets nothing. mcp_agent already makes the ATTACHMENT backend pluggable (webdav-local | zotero-cloud | local-dir) but no design gives metadata the same treatment. Additionally, the 'headless WebDAV fulltext shim' differentiator only serves users who already self-host Zotero WebDAV \u2014 a niche of a niche; most Zotero users are on Zotero File Storage, so the mainstream OSS path is zotero-cloud, which the designs treat as an afterthought.",
+    "fix": "Pluggable metadata backend: zotero-web-api | local (read-only zotero.sqlite snapshot, or the local Zotero HTTP API at localhost:23119) \u2014 mirror the attachment-backend pattern and adopt mcp_agent's attachment pluggability in the synthesis (distribution's kp-zotero lacks it). Quickstart declares the zotero.org-account requirement where the web API is chosen; docs position zotero-cloud as the default stranger path, WebDAV shim as the advanced self-hosted differentiator."
+   },
+   {
+    "severity": "major",
+    "finding": "Designed-in race in the Curio\u2192index data flow, and the canonical-side commit step is unowned. Curio writes into the Mac-local vault clone; the G11 mirror and pve indexer only see committed-and-pushed state; yet the events-v1 webhook 'wakes the maintenance drain' on promotion \u2014 before the note can possibly be in the mirror. 'Promoted articles indexed within minutes' is false unless something commits and pushes the Mac vault automatically. Only integration_fabric mentions an 'optional vault autocommit watcher' and no design places it (it must run on the Mac, i.e. the product ships a client-side component nobody scoped).",
+    "fix": "Name and ship the component: `kp vault autocommit` (launchd/systemd user unit, debounced, .curio-temp-aware) as part of the product; the webhook handler must poll the mirror for the promoted curio_id (bounded retry) before draining, or trigger a mirror pull-after-push. Document the latency contract honestly (promotion \u2192 committed \u2192 mirrored \u2192 indexed)."
+   },
+   {
+    "severity": "major",
+    "finding": "kp-vault write-path credential contradiction: integration_fabric's kp-sync decision states the G11 mirror is strictly read-only with 'no push credential on G11'; mcp_agent puts propose_note/propose_patch \u2014 which commit and PUSH proposals branches \u2014 inside kp-vault on G11 CT 207 (and says it is 'the ONLY write path any agent has'). Both cannot hold. Either G11 holds a push token (contradicting the mirror doctrine) or the write tools live librarian-side (contradicting 'kp-vault is the only write path').",
+    "fix": "Decide once: recommend kp-vault holds a second, narrowly-scoped proposals-only push token distinct from the read-only mirror deploy key (two credentials, one host; the mirror worktree itself stays read-only \u2014 proposals push from a separate working dir), and amend the 'no push credential on G11' sentence. Alternatively keep G11 credential-free and route propose_* through the librarian host; then drop the 'only write path is the tool' claim and re-derive the safety story."
+   },
+   {
+    "severity": "major",
+    "finding": "The docker-compose reference deployment is exercised by zero real deployments, including the author's. Three conflicting profile taxonomies (core|ollama|postgres|zotero|librarian|curio-webhook vs all-in-one|split vs core|mcp|index|postgres|ollama), plus a compose.split.yml two-box story \u2014 while Alex's actual instance is Ansible-provisioned LXC CTs and a VM running uv/systemd (docker nested in hypervisor LXC is its own pain and nothing says he'll do it). So the published images and compose files are unowned artifacts that rot, and the 'Alex's install is the reference deployment' claim is false at the packaging layer.",
+    "fix": "Unify to one profile set (core | ollama | zotero | librarian); publish TWO first-class install modes \u2014 uvx/pip + systemd (what Alex actually runs, documented as such) and compose (what the demo-smoke CI actually executes) \u2014 so both modes have a real, continuously-exercised user. Cut compose.split.yml (see should_cut); the HTTP index-service seam is the split story, Ansible is its only real consumer."
+   },
+   {
+    "severity": "major",
+    "finding": "Frontmatter schema contradiction that consumers will pin against: distribution and integration_fabric define kp-note.v1 (lifecycle status absent everywhere, bare-hex sha256 checksum, Curio-anchored); mcp_agent defines 'kp-frontmatter-v2' where KP-native notes DO carry status and a prefixed checksum. A first public release cannot ship a v2 name, two checksum formats, and two status doctrines.",
+    "fix": "Synthesis adopts kp-note/v1 exactly as distribution/integration_fabric specify (status index-side for ALL notes, bare checksum, kind/origin enum resolved to one name \u2014 pick `kind`); delete kp-frontmatter-v2 and mcp_agent's status-in-KP-native-notes clause; the MCP tool-surface contract references kp-note/v1."
+   },
+   {
+    "severity": "major",
+    "finding": "Cross-repo contract CI depends on Curio schema artifacts that will not exist for ~11\u201314.5 weeks (Curio Phase 3 ships frontmatter-v1/events-v1). 'Native integration enforced by construction' and 'CI pulls Curio's published schema artifacts every run' are unbuildable at KP v1 \u2014 the job has nothing to pull, and gating KP releases on it couples KP's timeline to Curio's. The 'vendors pinned schemas' language papers over the fact that only draft schemas from design docs exist today.",
+    "fix": "Vendor the DRAFT schemas as pinned fixtures now (labeled draft, sha-pinned to the Curio design docs); make the pull-latest CI job conditional/allow-fail until Curio's first schema release, flipping to hard-fail at that point; label Curio integration 'preview' in v1 docs; file the schema-review issues immediately (that part is correctly sequenced)."
+   },
+   {
+    "severity": "major",
+    "finding": "'Rebuild is the whole upgrade story' ignores CPU economics on stranger hardware. Full reindex of a real corpus (thousands of notes + hundreds of PDFs through Docling OCR + re-embedding) on a NAS/Celeron is hours-to-days; if index-meta.json epochs bump on kp_version or contract-version changes (as distribution specifies \u2014 epoch includes kp_version), routine minor upgrades force punitive rebuilds and users will stop upgrading.",
+    "fix": "Epoch = f(embedding model+dims, chunker version, normalization version) ONLY \u2014 kp_version and contract versions are recorded but never invalidate; chunk-level content-hash cache lets unchanged chunks skip re-embedding across rebuilds; OCR output cache keyed on attachment hash survives all epochs; docs publish measured rebuild throughput (notes/min CPU) so users can predict cost."
+   },
+   {
+    "severity": "major",
+    "finding": "MCP client friction is waved away as 'any MCP client works'. Concretely: .mcp.json is a Claude Code convention (Claude Desktop uses claude_desktop_config.json; Cursor/Zed/others differ); three separate servers mean three config entries and, in HTTP mode, three per-consumer bearer tokens with NO minting/rotation command anywhere in the CLI surface (`kp mcp install` writes entries, nothing mints tokens); many clients still lack Streamable-HTTP+bearer support. The 15-minute agent story is only true for Claude Code \u2014 which circles back to the Anthropic dependence.",
+    "fix": "Ship `kp mcp install --client claude-code|claude-desktop|cursor|--print` (print-JSON as universal fallback); add `kp token mint|list|revoke`; offer a single combined kp-mcp entrypoint (one process, all three tool groups namespaced) as the single-box default \u2014 one config entry, one token \u2014 with per-server split as a deployment option; document a tested-clients matrix instead of the 'any client' claim."
+   },
+   {
+    "severity": "major",
+    "finding": "The instance-repo consumption story contradicts house submodule rules as written. distribution says 'the management plane consumes the instance repo per RFC-0014/ADR-0022 (pinned submodule under ansible/roles/**/files/)' \u2014 but ADR-0022 vendoring is for guest APP code, and what actually runs on guests is the PRODUCT code at the instance's pin, not the instance repo (which is config/secrets refs that must never be vendored into the management plane's public-ish surfaces or CI logs). The pin indirection (management plane \u2192 instance repo \u2192 product tag) is unspecified: who resolves it at apply time, and how does check_iac's submodule-populated gate treat a pip/image pin instead of a submodule?",
+    "fix": "Specify the chain concretely: management-plane Ansible roles install the PRODUCT at the tag recorded in the instance repo (pip index pin or image tag file \u2014 no submodule needed for a released Python package), and templates config from the instance repo at apply time; write the small RFC-0016 process note for the GitHub-canonical product repo (Mode A reference mirror) in the same change set, since both other designs flag it and none writes it."
+   },
+   {
+    "severity": "minor",
+    "finding": "Wikilinks are an Obsidian-ism inside a system claiming Obsidian is never required: companion notes 'wikilink the Curio note', the vault gate validates 'wikilink integrity', get_backlinks assumes them \u2014 while Curio emits CommonMark and non-Obsidian viewers render [[...]] dead. The link format is an undeclared part of kp-note/v1.",
+    "fix": "Declare link policy in kp-note/v1: standard markdown relative links are the canonical form KP writes; [[wikilinks]] accepted and resolved by the parser/gate for Obsidian users. Companion notes default to markdown links."
+   },
+   {
+    "severity": "minor",
+    "finding": "Package layout disagreement: 6 packages (distribution: incl. kp-zotero, no kp-sync) vs 6 different (integration_fabric: kp-sync, zotero absorbed into ingest/mcp) vs 7 (mcp_agent: shared/ingest/index/mcp-zotero/mcp-vault/mcp-retrieval/librarian). Same for scaffolding command names (kp init-vault vs vault-template vs kp init --claude). A stranger reading two docs pages sees two products.",
+    "fix": "Pick one layout: kp-core, kp-ingest, kp-index, kp-mcp (all servers, subcommand-per-server), kp-zotero, kp-librarian; fold kp-sync's mirror/feed/webhook duties into kp-mcp (server-side) and kp-core (git plumbing). One scaffold verb: `kp init` with flags."
+   },
+   {
+    "severity": "minor",
+    "finding": "Events-location rule stated three inconsistent ways: distribution says XDG default/in-vault option; integration_fabric says '.curio/events/ gitignored'; mcp_agent's vault tree literally shows '.curio/ (manifest.json, events/)' as committed. Given the designs themselves call committed reading history a privacy incident, the inconsistency is a docs-borne foot-gun.",
+    "fix": "One rule everywhere: events default to XDG state dir; when a user opts into in-vault, `kp init`/docs force a .gitignore entry for .curio/events/ (manifest stays committed); Alex's committed-events choice, if he keeps it, is labeled instance-private in the instance repo only, never in product docs."
+   },
+   {
+    "severity": "minor",
+    "finding": "Digest auto-merge policy conflict: integration_fabric says deterministic auto-merge for digest notes is 'off by default'; mcp_agent calls digest branches 'auto-mergeable' and makes the CI validator 'the only identity permitted to auto-merge digest/stub path classes' \u2014 stubs were review-required in the other design.",
+    "fix": "Off by default for everything; digest-only auto-merge is an opt-in requiring forge branch protection to be configured; stubs are always review-required. State it once in the proposals/v1 contract."
+   },
+   {
+    "severity": "minor",
+    "finding": "The Atom digest feed has no OSS serving story: kp-sync 'renders digests/ into an Atom feed on G11 Caddy' (instance), but in the core single-box profile nobody serves the file, and Curio's W1 private-network allowlist question applies to localhost URLs too \u2014 the loop-closing feature may not work even same-machine until W1 lands.",
+    "fix": "Feed renderer writes a static file; the core container exposes it on the existing HTTP bind (or docs say 'point any web server at it'); explicitly include localhost-allowlist semantics in the W1 ask filed with Curio."
+   },
+   {
+    "severity": "minor",
+    "finding": "MCP dual-spec support (2025-06-18 stable + 2026-07-28 RC) is named in mcp_agent as a consumed contract and admitted as test-matrix burden \u2014 for a v1 with one realistic client base, supporting two protocol revisions doubles transport testing for no adopter.",
+    "fix": "Target the RC via the pinned FastMCP SDK version only; stdio (transport-version-agnostic in practice) covers legacy clients; drop the dual-revision test matrix."
+   }
+  ],
+  "must_fix": [
+   "Local no-forge disposal flow: `kp propose`/`kp review`/`kp apply` running the same deterministic validator locally is the DEFAULT safety model; forge CI + branch protection is optional hardening. The OSS story must work with zero git remote.",
+   "Default in-process CPU embedding driver (pinned small ONNX model) so `just demo` and the quickstart run with no Ollama/external endpoint; OpenAI-compatible HTTP stays as the upgrade seam; demo-smoke CI runs the real path with the model cached and the quickstart states one measured wall-clock number including prerequisites.",
+   "Deterministic-baseline librarian: maintenance loop and a baseline digest (embedding-similarity ranking against now.md threads + recency decay) require zero LLM and zero agent harness; Claude Code and any other harness are optional enhancers. Remove any v1 path where the discovery loop only works with a Claude subscription.",
+   "Resolve the graph store to integration_fabric's answer: drop Kuzu and LanceDB; one index.db (sqlite-vec + FTS5 + relational edge tables, WAL, multi-process-safe); Postgres driver mirrors the DDL. Update the RFC-0018 graph amendment text.",
+   "Pluggable Zotero METADATA backend (zotero-web-api | local zotero.sqlite/localhost:23119) alongside the already-pluggable attachment backend (webdav-local | zotero-cloud | local-dir \u2014 adopt mcp_agent's version in the synthesis); quickstart prominently discloses the zotero.org-account requirement when web-api is chosen and positions zotero-cloud as the mainstream stranger path.",
+   "One frontmatter contract: kp-note/v1 with status index-side for ALL notes and bare-hex checksum; delete mcp_agent's kp-frontmatter-v2 (name, prefixed checksum, and status-on-KP-native-notes clauses).",
+   "Resolve the G11 write-credential contradiction: either kp-vault on G11 holds a proposals-only push token distinct from the read-only mirror deploy key (recommended, with the mirror-doctrine sentence amended), or propose_* moves librarian-side and the 'tool layer is the only write path' claim is rewritten.",
+   "Name and ship the canonical-side commit component (`kp vault autocommit` launchd/systemd user unit) and make the Curio-webhook maintenance trigger poll the mirror for the promoted curio_id before draining \u2014 otherwise 'indexed within minutes' is false by construction.",
+   "Unify package layout, compose profiles, and scaffold commands to one taxonomy; publish two first-class install modes (uvx/pip+systemd \u2014 Alex's real mode, documented as such \u2014 and compose \u2014 the CI-exercised demo mode) so every published artifact has a real continuously-exercised user.",
+   "Curio contract CI: vendor DRAFT schemas as sha-pinned fixtures now, keep the pull-released-artifacts job allow-fail until Curio's first schema release, label Curio integration 'preview' in v1 docs, and decouple KP release gating from Curio's timeline; file the schema-review issues immediately.",
+   "Index epoch invalidation keyed ONLY on embedding model+dims / chunker / normalization versions (never kp_version); chunk-level content-hash embedding reuse and an epoch-surviving OCR cache, with published CPU rebuild-throughput numbers.",
+   "MCP DX: `kp mcp install --client <name>|--print`, `kp token mint|list|revoke`, and a single combined kp-mcp entrypoint (namespaced tool groups, one config entry, one token) as the single-box default; replace 'any MCP client works' with a tested-clients matrix."
+  ],
+  "should_cut": [
+   "The minimal fallback RSS fetcher package feature \u2014 feed parsing is a maintenance tar-pit duplicating Curio; keep an examples/ script emitting kp-note/v1 and the 'any conforming producer' contract as the OSS answer.",
+   "The Postgres/pgvector driver at v1 \u2014 the index-service seam means even Alex can run embedded stores on pve (distribution names this as his fallback), which removes the only real v1 user and deletes the unverified-managed-postgres-pgvector/PG15 risk from the critical path; ship the driver INTERFACE with embedded-only and land postgres post-v1 when someone needs it.",
+   "compose.split.yml \u2014 no real consumer (Alex's split is Ansible); the versioned HTTP index-query seam is the split story; add a docs page instead of a maintained artifact.",
+   "The openai-compatible DISCOVERY adapter at v1 (keep the deterministic baseline digest as the harness-free path; keep the neutral runner for the maintenance loop only if it survives scope review).",
+   "The CPU reranker (bge-reranker) compose profile \u2014 off-by-default optional stated in one design only; post-v1.",
+   "zotero add_item / write-scope tools \u2014 flag-gated writes to a staging collection is scope without a v1 user; read-only ships first.",
+   "The Zotero annotations managed-region mirror \u2014 companion notes are the day-1 mechanism all three designs agree on; the managed-region SPEC stays reserved with Curio, its implementation waits.",
+   "MCP Registry publication and the dual MCP-spec-revision (2025-06-18 + RC) test matrix at v1 \u2014 pin the SDK at the RC, stdio covers the rest.",
+   "Full macOS CI matrix \u2014 keep Linux as the release-blocking demo-smoke, macOS as a non-blocking smoke until the demo job is proven stable.",
+   "ranking-hints.v1 stays name-reserved only (as distribution says) \u2014 no schema drafting effort at v1."
+  ]
+ }
+]
