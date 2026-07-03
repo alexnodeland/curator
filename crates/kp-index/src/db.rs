@@ -587,6 +587,40 @@ impl Index {
         Ok(rows)
     }
 
+    /// Copy consumer/operational state — `cursors`, `seen_events`,
+    /// `behavior`, `digest_log` — from a previous epoch's file into this
+    /// one. The epoch builder calls this before the swap.
+    ///
+    /// Retrieval state (notes, chunks, vectors, FTS, links) is derived
+    /// from the vault and rebuilt from scratch; consumer state is NOT
+    /// re-derivable: an events refold recovers only what the producer's
+    /// retention still holds (aggregates older than retention would be
+    /// lost), and producer cursors (e.g. the Zotero library version)
+    /// cannot be re-obtained at all — dropping one silently skips
+    /// tombstones that fired before the rebuild, forever.
+    pub fn copy_consumer_state_from(&mut self, old: &Path) -> Result<(), IndexError> {
+        self.conn
+            .execute("ATTACH DATABASE ?1 AS old", params![old.to_string_lossy()])?;
+        let copy = self.conn.execute_batch(
+            "BEGIN;
+             INSERT OR IGNORE INTO cursors (consumer, file, line)
+               SELECT consumer, file, line FROM old.cursors;
+             INSERT OR IGNORE INTO seen_events (consumer, event_id, ts)
+               SELECT consumer, event_id, ts FROM old.seen_events;
+             INSERT OR IGNORE INTO behavior
+               (kp_id, opened_count, starred, read_later, last_activity)
+               SELECT kp_id, opened_count, starred, read_later, last_activity
+               FROM old.behavior;
+             INSERT OR IGNORE INTO digest_log (digest_date, kp_id, created)
+               SELECT digest_date, kp_id, created FROM old.digest_log;
+             COMMIT;",
+        );
+        let detach = self.conn.execute("DETACH DATABASE old", []);
+        copy?;
+        detach?;
+        Ok(())
+    }
+
     /// `PRAGMA integrity_check` — used by the epoch machinery before a
     /// blue/green swap.
     pub fn integrity_check(&self) -> Result<(), IndexError> {

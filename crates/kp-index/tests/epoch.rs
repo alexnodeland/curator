@@ -222,3 +222,73 @@ fn concurrent_writers_and_swaps_are_refused_while_a_writer_is_live() {
     let report = build_epoch(&cfg, &e).expect("rebuild after release");
     assert_eq!(report.epoch, 2);
 }
+
+/// Regression: consumer/operational state must survive a blue/green
+/// rebuild. Retrieval rows are re-derived from the vault, but a producer
+/// cursor (e.g. the Zotero library version) is NOT re-derivable — losing
+/// it on `kp reindex` silently skips every tombstone that fired before
+/// the rebuild, forever. Behavior rollups, event dedupe, and the digest
+/// log ride along for the same reason (retention limits refolds).
+#[test]
+fn consumer_state_survives_epoch_rebuilds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = config_for(dir.path());
+    let e = HashEmbedder::new(64);
+    write_note(&cfg, "a.md", "first epoch content\n");
+    build_epoch(&cfg, &e).expect("first build");
+
+    let mut idx = Index::open(cfg.index_path(), &e).expect("writer");
+    idx.set_cursor("zotero", "library-version", 812)
+        .expect("cursor");
+    idx.set_cursor("curio-events", "events-20260701.jsonl", 4)
+        .expect("cursor");
+    assert!(
+        idx.mark_event_seen("curio-events", "01AAA", "2026-07-01T10:00:00.000Z")
+            .expect("seen")
+    );
+    idx.apply_behavior(
+        "curio:x",
+        &kp_index::BehaviorDelta {
+            opened_delta: 3,
+            starred: Some(true),
+            activity_ts: Some("2026-07-01T10:00:00.000Z".into()),
+            ..Default::default()
+        },
+    )
+    .expect("fold");
+    assert!(
+        idx.record_digest("2026-07-01", "kp:d1", "2026-07-01T18:00:00Z")
+            .expect("digest")
+    );
+    idx.close().expect("close");
+
+    write_note(&cfg, "b.md", "second epoch content\n");
+    let report = build_epoch(&cfg, &e).expect("rebuild");
+    assert_eq!(report.epoch, 2);
+
+    let mut idx = Index::open(cfg.index_path(), &e).expect("reopen");
+    assert_eq!(
+        idx.cursor("zotero", "library-version").expect("cursor"),
+        Some(812),
+        "the producer cursor must survive the rebuild"
+    );
+    assert_eq!(
+        idx.cursor("curio-events", "events-20260701.jsonl")
+            .expect("cursor"),
+        Some(4)
+    );
+    assert!(
+        !idx.mark_event_seen("curio-events", "01AAA", "2026-07-01T10:00:00.000Z")
+            .expect("seen"),
+        "dedupe rows must survive — a replay after rebuild must not refold"
+    );
+    let stats = idx.behavior("curio:x").expect("query").expect("row");
+    assert_eq!(stats.opened_count, 3);
+    assert!(stats.starred);
+    assert!(
+        !idx.record_digest("2026-07-01", "kp:d1", "2026-07-01T18:00:00Z")
+            .expect("digest"),
+        "the digest log must survive — the date stays taken"
+    );
+    idx.close().expect("close");
+}

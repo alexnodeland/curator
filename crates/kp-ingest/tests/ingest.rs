@@ -191,7 +191,8 @@ fn rebuild_reproduces_the_ingest_corpus() {
 
     // Blue/green rebuild: SAME corpus and identities as ingest — the
     // .kpignore'd and schema-violating notes stay out, the Curio note
-    // keeps its curio: identity, links and behavior are re-derived.
+    // keeps its curio: identity, links are re-derived, and CONSUMER
+    // state (cursors, dedupe, behavior) carries forward through the swap.
     let report = kp_ingest::rebuild(&cfg, &embedder).expect("rebuild");
     assert_eq!(report.epoch, 2, "epoch counter advances");
     assert_eq!(report.notes_indexed, 5);
@@ -200,9 +201,10 @@ fn rebuild_reproduces_the_ingest_corpus() {
     assert_eq!(report.links, 6);
     let events = report.events.as_ref().expect("curio enabled");
     assert_eq!(
-        events.folded, 6,
-        "fresh epoch re-folds the retained event log"
+        events.folded, 0,
+        "carried cursors resume the tail — nothing refolds"
     );
+    assert_eq!(events.duplicates, 0);
 
     let probe = HashEmbedder::new(64);
     let index = Index::open(&index_path, &probe).expect("open");
@@ -224,7 +226,7 @@ fn rebuild_reproduces_the_ingest_corpus() {
     let behavior = index
         .behavior(CURIO_KP_ID)
         .expect("query")
-        .expect("re-folded");
+        .expect("behavior rollup carried across the rebuild");
     assert_eq!(behavior.opened_count, 2);
     assert!(!behavior.starred);
     assert_eq!(

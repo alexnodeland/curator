@@ -6,7 +6,9 @@
 //! upsert kp-note/v1 files into the configured vault dir (managed-region
 //! merge, user zones preserved) → apply tombstones (pristine files are
 //! removed, user-edited files move to `.kp/trash/` — never deleted) →
-//! persist the library-version cursor in kp-index.
+//! persist the library-version cursor in kp-index (consumer state, so
+//! it survives `kp reindex`: epoch rebuilds carry cursors forward —
+//! losing it would silently skip pre-rebuild tombstones forever).
 //!
 //! Disabled is a first-class clean outcome: `[zotero] enabled = false`, an
 //! unset/empty API key env, or an empty `user_id` all return a report with

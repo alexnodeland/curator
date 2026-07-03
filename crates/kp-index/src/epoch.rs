@@ -1,12 +1,17 @@
 //! Blue/green epoch rebuilds — never in-place migrations.
 //!
-//! An index epoch is a pure function of (embedding model + dims, chunker
-//! version, normalization version). Any mismatch — new model, new schema,
-//! new chunker — means [`build_epoch`]: write `index.db.next` COMPLETELY,
-//! verify it, then atomically rename over `index.db`. A crash at any point
-//! leaves the serving epoch untouched; there is no partially-migrated
-//! state to recover, ever. Incremental ingest (same epoch) updates in
-//! place via [`Index::upsert_note`].
+//! An index epoch's RETRIEVAL state is a pure function of (embedding
+//! model + dims, chunker version, normalization version). Any mismatch —
+//! new model, new schema, new chunker — means [`build_epoch`]: write
+//! `index.db.next` COMPLETELY, verify it, then atomically rename over
+//! `index.db`. Consumer/operational state (cursors, event dedupe,
+//! behavior rollups, digest log) is NOT derivable from the vault and is
+//! carried forward from the serving epoch instead
+//! ([`Index::copy_consumer_state_from`]). A crash at any point leaves the
+//! serving epoch untouched; there is no partially-migrated state to
+//! recover, ever. Incremental ingest (same epoch) updates in place via
+//! [`Index::upsert_note`]. The whole build + swap holds the index writer
+//! lock (see db.rs) — concurrent writers are refused, never raced.
 
 use std::path::Path;
 
@@ -107,10 +112,13 @@ pub fn build_epoch_from(
     remove_db_files(&next_path)?;
 
     // The epoch counter continues from the serving file when it is
-    // readable; anything else (first build, corrupt file) restarts at 1.
-    let epoch = crate::db::IndexReader::open(&live_path)
-        .map(|r| r.meta().epoch + 1)
-        .unwrap_or(1);
+    // readable; anything else (first build, corrupt file, older schema)
+    // restarts at 1 — and only a readable same-schema file donates its
+    // consumer state below.
+    let prev_meta = crate::db::IndexReader::open(&live_path)
+        .ok()
+        .map(|r| r.meta().clone());
+    let epoch = prev_meta.as_ref().map_or(1, |m| m.epoch + 1);
 
     let mut next = Index::create(&next_path, embedder, epoch)?;
     let params = ChunkParams::from_config(&config.index);
@@ -132,6 +140,16 @@ pub fn build_epoch_from(
         let vectors = embedder.embed(&texts)?;
         next.upsert_note_prechunked(note, embedder, &chunks, &vectors)?;
         indexed += 1;
+    }
+
+    // Consumer state is not derivable from the vault — carry it forward
+    // from the serving epoch (cursors incl. producer cursors like the
+    // Zotero library version, event dedupe, behavior rollups, digest
+    // log). Without this, a routine `kp reindex` would drop e.g. the
+    // Zotero cursor, and tombstones that fired before the rebuild would
+    // be missed forever (a fresh sync starts past them).
+    if prev_meta.is_some() {
+        next.copy_consumer_state_from(&live_path)?;
     }
 
     // Verify BEFORE the swap: structural integrity + completeness. A next

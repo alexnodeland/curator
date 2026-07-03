@@ -251,18 +251,19 @@ pub struct RebuildReport {
     pub ignored: usize,
     /// Outgoing links recorded across the corpus.
     pub links: usize,
-    /// The events-tail pass (present when `[curio].enabled`). A fresh
-    /// epoch has empty cursors/dedupe state, so this re-folds every event
-    /// the producer still retains — behavior rollups are derived and
-    /// disposable by design.
+    /// The events-tail pass (present when `[curio].enabled`). Consumer
+    /// state (cursors, dedupe, behavior rollups) carries forward across
+    /// the epoch swap, so this pass simply resumes — it folds only events
+    /// appended since the last tail, exactly like an incremental ingest.
     pub events: Option<TailReport>,
 }
 
 /// Blue/green epoch rebuild over the SAME corpus `ingest` indexes: the
-/// walker (`.kpignore` honored), the Curio adapter (identities and
-/// declared checksums preserved), the heading-aware chunker. After the
-/// swap, links are re-derived and — when Curio is enabled — the events
-/// tail re-folds behavioral state from the retained log.
+/// walker (`.kpignore` honored), the Curio adapter (identities
+/// preserved), the heading-aware chunker. Consumer state (cursors, event
+/// dedupe, behavior rollups, digest log) carries forward through the
+/// swap; after it, links are re-derived and — when Curio is enabled —
+/// the events tail resumes from its carried cursors.
 pub fn rebuild(config: &KpConfig, embedder: &dyn Embedder) -> Result<RebuildReport, IngestError> {
     let vault = Vault::open(config.vault_path())?;
     let adapter = CurioAdapter::new();
