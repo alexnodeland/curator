@@ -18,6 +18,8 @@ tracing = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]
+# Published-schema conformance tests (contracts/*/v1.schema.json).
+jsonschema = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 
