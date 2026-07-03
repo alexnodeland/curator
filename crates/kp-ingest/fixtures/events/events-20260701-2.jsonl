@@ -1,0 +1,2 @@
+{"schema":"curio.events.v1","event_id":"01ARZ3NDEKTSV4RRFFQ69G5003","ts":"2026-07-01T21:00:00.000Z","type":"article.starred","payload":{"curio_id":"0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d","tags":["rust","async"]}}
+{"schema":"curio.events.v1","event_id":"01ARZ3NDEKTSV4RRFFQ69G5004","ts":"2026-07-01T21:00:01.000Z","type":"article.read_later.added","payload":{"curio_id":"0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d","tags":["rust","async"]}}

@@ -1,0 +1,272 @@
+//! End-to-end ingest over the checked-in fixture vault: a small realistic
+//! corpus (plain notes, a kp-frontmatter note, a Curio export with managed
+//! region + manifest + events, wikilinks, `.kpignore`). The fixture tree
+//! is READ-ONLY — ingest writes only to the index in a tempdir.
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use kp_core::KpConfig;
+use kp_index::embed::EmbedError;
+use kp_index::{Embedder, HashEmbedder, Index};
+use kp_ingest::ingest;
+
+const CURIO_KP_ID: &str = "curio:0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d";
+const RUST_NOTES_KP_ID: &str = "kp:0197c001-2222-7bbb-8ccc-000000000001";
+
+/// Wraps the hash embedder and counts the expensive path.
+struct CountingEmbedder {
+    inner: HashEmbedder,
+    calls: AtomicUsize,
+    texts: AtomicUsize,
+}
+
+impl CountingEmbedder {
+    fn new() -> Self {
+        Self {
+            inner: HashEmbedder::new(64),
+            calls: AtomicUsize::new(0),
+            texts: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Embedder for CountingEmbedder {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+    fn dims(&self) -> usize {
+        self.inner.dims()
+    }
+    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.texts.fetch_add(texts.len(), Ordering::SeqCst);
+        self.inner.embed(texts)
+    }
+}
+
+fn fixture(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
+}
+
+fn config(index_path: &std::path::Path) -> KpConfig {
+    let toml = format!(
+        "schema = \"kp-config/v1\"\n\
+         [vault]\npath = \"{vault}\"\n\
+         [index]\npath = \"{index}\"\nembedder = \"hash\"\nchunk_tokens = 64\nchunk_overlap = 8\n\
+         [curio]\nenabled = true\nevents_dir = \"{events}\"\n",
+        vault = fixture("fixtures/vault").display(),
+        index = index_path.display(),
+        events = fixture("fixtures/events").display(),
+    );
+    KpConfig::from_toml_str(&toml).expect("fixture config parses")
+}
+
+#[test]
+fn full_pipeline_over_the_fixture_vault() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let index_path = dir.path().join("kp").join("index.db");
+    let cfg = config(&index_path);
+
+    // ---- First run: everything is new. ----
+    let embedder = CountingEmbedder::new();
+    let report = ingest(&cfg, &embedder).expect("first ingest");
+
+    assert_eq!(report.scanned, 6, "6 eligible notes walked");
+    assert_eq!(report.ignored, 2, ".kpignore drops drafts/ and *.tmp.md");
+    assert_eq!(report.curio_notes, 1);
+    assert_eq!(report.skipped, 1, "the schema-violating Curio note");
+    assert_eq!(report.ingested, 5);
+    assert_eq!(report.unchanged, 0);
+    assert_eq!(report.removed, 0);
+    assert_eq!(report.links, 6);
+    // Batch-first: ONE embed call for the whole run.
+    assert_eq!(embedder.calls.load(Ordering::SeqCst), 1);
+    assert!(embedder.texts.load(Ordering::SeqCst) >= 5);
+
+    let events = report.events.as_ref().expect("curio enabled");
+    assert_eq!(events.files, 3);
+    assert_eq!(events.folded, 6);
+    assert_eq!(events.duplicates, 0);
+    assert_eq!(events.malformed, 0);
+
+    // ---- The indexed state. ----
+    let probe = HashEmbedder::new(64);
+    let index = Index::open(&index_path, &probe).expect("open");
+
+    // Identity derivation: explicit kp_id > curio adapter > path fallback.
+    let curio_state = index
+        .note_state(CURIO_KP_ID)
+        .expect("query")
+        .expect("curio note indexed under its adapted identity");
+    assert_eq!(curio_state.path, "curio/rust-async-patterns.md");
+    assert_eq!(
+        curio_state.checksum.as_deref(),
+        Some("sha256:4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5"),
+        "curio notes are change-detected by their DECLARED checksum"
+    );
+    assert!(
+        index.note_state(RUST_NOTES_KP_ID).expect("query").is_some(),
+        "explicit kp_id wins"
+    );
+    assert!(
+        index
+            .note_state("path:notes/databases.md")
+            .expect("query")
+            .is_some(),
+        "plain notes fall back to path identity"
+    );
+    // Ignored + invalid notes never land.
+    for absent in [
+        "path:drafts/wip.md",
+        "path:scratch.tmp.md",
+        "path:curio/broken-import.md",
+    ] {
+        assert!(
+            index.note_state(absent).expect("query").is_none(),
+            "{absent} must not be indexed"
+        );
+    }
+
+    // Links: wikilinks + md links, resolved across identity namespaces.
+    assert_eq!(
+        index.links_from("path:now.md").expect("query"),
+        vec![
+            (RUST_NOTES_KP_ID.to_owned(), "wikilink".to_owned()),
+            ("path:notes/databases.md".to_owned(), "wikilink".to_owned()),
+        ]
+    );
+    assert_eq!(
+        index.links_from(RUST_NOTES_KP_ID).expect("query"),
+        vec![
+            ("path:guides/chunking.md".to_owned(), "markdown".to_owned()),
+            ("path:notes/databases.md".to_owned(), "wikilink".to_owned()),
+        ]
+    );
+    assert_eq!(
+        index.links_from(CURIO_KP_ID).expect("query"),
+        vec![(RUST_NOTES_KP_ID.to_owned(), "wikilink".to_owned())]
+    );
+
+    // Behavior folded from the events fixtures: 2 opens, star negated,
+    // read-later kept, last activity = the newest event.
+    let behavior = index
+        .behavior(CURIO_KP_ID)
+        .expect("query")
+        .expect("events folded");
+    assert_eq!(behavior.opened_count, 2);
+    assert!(!behavior.starred, "negation honored");
+    assert!(behavior.read_later);
+    assert_eq!(
+        behavior.last_activity.as_deref(),
+        Some("2026-07-02T08:00:00.000Z")
+    );
+    index.close().expect("close");
+
+    // ---- Second run: nothing changed → the expensive path MUST NOT run. ----
+    let embedder2 = CountingEmbedder::new();
+    let report2 = ingest(&cfg, &embedder2).expect("second ingest");
+    assert_eq!(report2.unchanged, 5, "every indexed note is unchanged");
+    assert_eq!(report2.ingested, 0);
+    assert_eq!(
+        embedder2.calls.load(Ordering::SeqCst),
+        0,
+        "unchanged notes must not re-embed"
+    );
+    assert_eq!(embedder2.texts.load(Ordering::SeqCst), 0);
+    let events2 = report2.events.as_ref().expect("curio enabled");
+    assert_eq!(events2.folded, 0, "cursors resume past all events");
+    assert_eq!(events2.duplicates, 0);
+}
+
+#[test]
+fn rebuild_reproduces_the_ingest_corpus() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let index_path = dir.path().join("index.db");
+    let cfg = config(&index_path);
+    let embedder = CountingEmbedder::new();
+    ingest(&cfg, &embedder).expect("ingest");
+
+    // Blue/green rebuild: SAME corpus and identities as ingest — the
+    // .kpignore'd and schema-violating notes stay out, the Curio note
+    // keeps its curio: identity, links and behavior are re-derived.
+    let report = kp_ingest::rebuild(&cfg, &embedder).expect("rebuild");
+    assert_eq!(report.epoch, 2, "epoch counter advances");
+    assert_eq!(report.notes_indexed, 5);
+    assert_eq!(report.notes_skipped, 1);
+    assert_eq!(report.ignored, 2);
+    assert_eq!(report.links, 6);
+    let events = report.events.as_ref().expect("curio enabled");
+    assert_eq!(
+        events.folded, 6,
+        "fresh epoch re-folds the retained event log"
+    );
+
+    let probe = HashEmbedder::new(64);
+    let index = Index::open(&index_path, &probe).expect("open");
+    assert_eq!(index.meta().epoch, 2);
+    assert!(index.note_state(CURIO_KP_ID).expect("query").is_some());
+    assert!(
+        index
+            .note_state("path:curio/rust-async-patterns.md")
+            .expect("query")
+            .is_none(),
+        "the curio note must NOT reappear under a path identity"
+    );
+    assert!(
+        index
+            .note_state("path:drafts/wip.md")
+            .expect("query")
+            .is_none()
+    );
+    let behavior = index
+        .behavior(CURIO_KP_ID)
+        .expect("query")
+        .expect("re-folded");
+    assert_eq!(behavior.opened_count, 2);
+    assert!(!behavior.starred);
+    assert_eq!(
+        index.links_from(CURIO_KP_ID).expect("query"),
+        vec![(RUST_NOTES_KP_ID.to_owned(), "wikilink".to_owned())]
+    );
+}
+
+#[test]
+fn vanished_notes_are_pruned_and_edits_reembed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vault_root = dir.path().join("vault");
+    std::fs::create_dir_all(&vault_root).expect("mkdir");
+    std::fs::write(vault_root.join("a.md"), "# A\n\nalpha body\n").expect("write");
+    std::fs::write(vault_root.join("b.md"), "# B\n\nbeta body\n").expect("write");
+    let index_path = dir.path().join("index.db");
+    let toml = format!(
+        "schema = \"kp-config/v1\"\n[vault]\npath = \"{}\"\n[index]\npath = \"{}\"\nembedder = \"hash\"\n",
+        vault_root.display(),
+        index_path.display(),
+    );
+    let cfg = KpConfig::from_toml_str(&toml).expect("parses");
+    let embedder = CountingEmbedder::new();
+
+    let report = ingest(&cfg, &embedder).expect("ingest");
+    assert_eq!(report.ingested, 2);
+
+    // Edit one note, delete the other.
+    std::fs::write(vault_root.join("a.md"), "# A\n\nalpha body, edited\n").expect("write");
+    std::fs::remove_file(vault_root.join("b.md")).expect("remove");
+
+    let embedder2 = CountingEmbedder::new();
+    let report = ingest(&cfg, &embedder2).expect("ingest");
+    assert_eq!(report.ingested, 1, "the edited note re-embeds");
+    assert_eq!(report.unchanged, 0);
+    assert_eq!(report.removed, 1, "the vanished note is pruned");
+    assert_eq!(embedder2.calls.load(Ordering::SeqCst), 1);
+
+    let probe = HashEmbedder::new(64);
+    let index = Index::open(&index_path, &probe).expect("open");
+    assert!(index.note_state("path:b.md").expect("query").is_none());
+    let a = index
+        .note_state("path:a.md")
+        .expect("query")
+        .expect("still indexed");
+    assert_eq!(a.path, "a.md");
+}

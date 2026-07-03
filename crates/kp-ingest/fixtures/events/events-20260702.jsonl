@@ -1,0 +1,2 @@
+{"schema":"curio.events.v1","event_id":"01ARZ3NDEKTSV4RRFFQ69G5005","ts":"2026-07-02T07:45:00.000Z","type":"article.unstarred","payload":{"curio_id":"0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d"}}
+{"schema":"curio.events.v1","event_id":"01ARZ3NDEKTSV4RRFFQ69G5006","ts":"2026-07-02T08:00:00.000Z","type":"article.opened","payload":{"curio_id":"0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d"}}

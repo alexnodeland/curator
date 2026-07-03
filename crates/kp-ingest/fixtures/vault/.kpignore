@@ -1,0 +1,3 @@
+# Drafts are private; anything *.tmp.md is scratch.
+drafts/
+*.tmp.md
