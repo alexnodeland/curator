@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 kp-core = { workspace = true }
+# The workspace dep pins default-features = false: the kp-cli binary
+# (not this library) decides whether the ONNX stack is compiled in.
 kp-index = { workspace = true }
 rmcp = { workspace = true, features = [
     "server",

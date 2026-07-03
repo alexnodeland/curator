@@ -34,6 +34,11 @@ clippy:
 litmus:
     cargo run -p xtask -- litmus
 
+# The lean build stays buildable: `kp` without the ONNX embedder stack
+# (no build-time ort download, no run-time model fetch)
+lean-check:
+    cargo check -p kp-cli --no-default-features
+
 # fmt-check + clippy + litmus
 lint: fmt-check clippy litmus
 
@@ -51,4 +56,4 @@ cov:
     cargo run -p xtask -- coverage-gate target/coverage.json
 
 # Everything CI runs, in CI's order
-ci: fmt-check clippy test doc litmus cov
+ci: fmt-check clippy test doc litmus lean-check cov

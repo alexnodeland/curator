@@ -39,6 +39,11 @@ jobs:
       - name: grep litmus (public-safety boundary)
         run: cargo run -p xtask -- litmus
 
+      # The lean build must stay buildable: `kp` without the ONNX
+      # embedder stack (no build-time ort download, no model fetch).
+      - name: lean build check (no default features)
+        run: cargo check -p kp-cli --no-default-features
+
       # Same instrumented run + gate as `just cov`: region coverage,
       # fail-under 80% on kp-core/kp-index/kp-librarian, report elsewhere.
       - name: coverage (region gate)

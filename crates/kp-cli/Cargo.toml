@@ -23,6 +23,13 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
+[features]
+# The pinned in-process ONNX embedder (`embedder = "builtin"`), on by
+# default. `cargo build -p kp-cli --no-default-features` produces a lean
+# hash-only `kp` with zero build-time or run-time downloads.
+default = ["embed-onnx"]
+embed-onnx = ["kp-index/embed-onnx"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 
