@@ -62,7 +62,7 @@ Six library crates plus one binary, in a single cargo workspace:
 | `kp-core` | vault model and atomic I/O, `kp-note/v1` frontmatter parse/validate, identity minting and resolution, checksum-as-change-token, `kp.toml` loading (`kp-config/v1`), Curio manifest ownership oracle, `proposals/v1` create/validate/apply |
 | `kp-ingest` | producers → vault/index: the Curio adapter (vanilla `curio.frontmatter.v1` notes, `curio.events.v1` tail with rotation-aware `(file, line)` cursors and `event_id` dedupe), web clips, ingest orchestration |
 | `kp-index` | chunker, `Embedder` trait (`builtin` pinned CPU ONNX, `hash` deterministic test embedder), `index.db` schema, incremental reindex, hybrid retrieval (RRF fusion over vector + FTS legs, one-hop edge expansion), blue/green epoch machinery |
-| `kp-zotero` | two-channel Zotero access: Web API metadata (delta polling via `Last-Modified-Version`, `/deleted` tombstones) + official `/fulltext` as the primary fulltext source, with a small CRC-verified WebDAV `.prop`/`.zip` fallback for self-hosted attachment stores; literature stubs land via proposals, keyed strictly on `zotero:<itemKey>` |
+| `kp-zotero` | two-channel Zotero access: Web API metadata (delta polling via `Last-Modified-Version`, `/deleted` tombstones) + official `/fulltext` as the primary fulltext source, with a small CRC-verified WebDAV `.prop`/`.zip` fallback for self-hosted attachment stores; literature notes land as `kp-note/v1` files in a configured vault dir inside a `kp-zotero:managed` region (like Curio, a producer writing its own marked region), keyed strictly on `zotero:<itemKey>` |
 | `kp-mcp` | the one MCP entrypoint (built on `rmcp`): stdio default, streamable HTTP + bearer token optional — MCP surface v1 |
 | `kp-librarian` | deterministic-first maintenance and digest loops (see below); optional LLM harness adapter as a prose enhancer |
 | `kp` (binary) | the CLI: `init`, `ingest`, `reindex`, `search`, `mcp`, `propose`/`review`/`apply`, `digest`, `status` |
@@ -128,8 +128,13 @@ flowchart LR
 - **Zotero** is **two-channel**: metadata rides the Zotero Web API (delta polling,
   deletion tombstones); fulltext comes from the official `/fulltext` endpoint first, with
   a ~30-line CRC-verified `.prop`/`.zip` WebDAV fallback for self-hosted attachment
-  stores. Literature-note stubs enter the vault via proposals, keyed on
-  `zotero:<itemKey>` — a citekey rename is a rename proposal, never a duplicate stub.
+  stores. Literature notes land in a configured vault dir as `kp-note/v1` files whose
+  machine content lives in a `kp-zotero:managed` comment-marker region — a producer
+  writing its own marked region, exactly like Curio — keyed strictly on
+  `zotero:<itemKey>`, so a citekey or title rename updates the same note, never a
+  duplicate. Re-syncs replace only the managed region; user zones and extra frontmatter
+  keys ride along untouched. Library tombstones delete only *pristine* (fully
+  machine-owned) files — anything the user edited moves to `.kp/trash/`, never deleted.
 - **Anything else** that writes conforming markdown+frontmatter into the vault is a valid
   producer. That sentence *is* the integration story: the contracts are published so the
   adapter list never needs to be.
