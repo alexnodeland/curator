@@ -33,9 +33,11 @@ cargo run -p kp-cli -- --help     # the `kp` binary
 ```
 
 Copy [`kp.example.toml`](kp.example.toml) to `kp.toml` and point
-`[vault].path` at your markdown directory. (Pre-release: most `kp`
-subcommands are scaffolding — see `docs/design/` for where this is
-going.)
+`[vault].path` at your markdown directory — or let `kp init` scaffold
+one. `kp --help` lists the surface: ingest, index rebuild, Zotero sync,
+search/get/related/recent, `mcp serve`, proposals, the librarian digest,
+doctor. (Pre-release: APIs are still settling — `docs/design/` is the
+design record.)
 
 For development: `just` lists the front door (`just ci` = exactly what CI
 runs).
