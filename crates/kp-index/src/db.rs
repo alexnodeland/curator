@@ -513,6 +513,14 @@ impl Index {
     /// Fold one behavioral delta into a note's rollup row. `starred` /
     /// `read_later` of `None` leave the flag untouched; `activity_ts`
     /// advances `last_activity` monotonically (max of old and new).
+    ///
+    /// Flag writes are guarded by event time: a delta whose `activity_ts`
+    /// is OLDER than the stored `last_activity` leaves the flags alone,
+    /// so late-arriving/backfilled event files (a device re-sync, a
+    /// restored backup) cannot replay a stale `starred`/`read_later`
+    /// value over a newer negation — folds are order-insensitive for
+    /// flags. `opened_count` stays a plain counter (dedupe by event id is
+    /// what guards it).
     pub fn apply_behavior(&mut self, kp_id: &str, delta: &BehaviorDelta) -> Result<(), IndexError> {
         apply_behavior_conn(&self.conn, kp_id, delta)
     }
@@ -704,13 +712,24 @@ fn apply_behavior_conn(
     kp_id: &str,
     delta: &BehaviorDelta,
 ) -> Result<(), IndexError> {
+    // Flag CASEs read last_activity's PRE-update value (SQLite UPDATE
+    // semantics), so "is this delta at least as new as everything folded
+    // so far?" and the monotonic advance live in one statement.
     conn.execute(
         "INSERT INTO behavior (kp_id, opened_count, starred, read_later, last_activity)
          VALUES (?1, ?2, COALESCE(?3, 0), COALESCE(?4, 0), ?5)
          ON CONFLICT(kp_id) DO UPDATE SET
            opened_count = opened_count + ?2,
-           starred      = COALESCE(?3, starred),
-           read_later   = COALESCE(?4, read_later),
+           starred = CASE
+             WHEN ?3 IS NULL THEN starred
+             WHEN ?5 IS NULL OR last_activity IS NULL OR last_activity <= ?5 THEN ?3
+             ELSE starred
+           END,
+           read_later = CASE
+             WHEN ?4 IS NULL THEN read_later
+             WHEN ?5 IS NULL OR last_activity IS NULL OR last_activity <= ?5 THEN ?4
+             ELSE read_later
+           END,
            last_activity = CASE
              WHEN ?5 IS NULL THEN last_activity
              WHEN last_activity IS NULL OR last_activity < ?5 THEN ?5
@@ -1314,12 +1333,12 @@ mod tests {
             },
         )
         .expect("fold");
-        // Negation: unstar. An OLDER ts must not roll last_activity back.
+        // Negation: a chronologically-newer unstar flips the flag.
         idx.apply_behavior(
             "curio:x",
             &BehaviorDelta {
                 starred: Some(false),
-                activity_ts: Some("2026-07-01T12:00:00.000Z".into()),
+                activity_ts: Some("2026-07-03T12:00:00.000Z".into()),
                 ..Default::default()
             },
         )
@@ -1332,9 +1351,64 @@ mod tests {
                 opened_count: 2,
                 starred: false,
                 read_later: true,
+                last_activity: Some("2026-07-03T12:00:00.000Z".into()),
+            }
+        );
+    }
+
+    /// Regression: a late-arriving OLDER event (a backfilled file, a
+    /// device re-sync replaying history whose dedupe rows were pruned)
+    /// must not clobber flags set by newer events — and must not roll
+    /// last_activity back. Folds are order-insensitive for flags.
+    #[test]
+    fn stale_events_cannot_replay_old_flag_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = tmp_index(dir.path());
+        // Newest state first: unstarred as of July 2.
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                starred: Some(false),
+                read_later: Some(true),
+                activity_ts: Some("2026-07-02T10:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        // A stale June star arrives late: counter still folds (dedupe by
+        // event id is the counter's guard), flags stay July-fresh.
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                opened_delta: 1,
+                starred: Some(true),
+                read_later: Some(false),
+                activity_ts: Some("2026-06-01T09:00:00.000Z".into()),
+            },
+        )
+        .expect("fold");
+        let stats = idx.behavior("curio:x").expect("row").expect("present");
+        assert_eq!(
+            stats,
+            BehaviorStats {
+                opened_count: 1,
+                starred: false,
+                read_later: true,
                 last_activity: Some("2026-07-02T10:00:00.000Z".into()),
             }
         );
+        // Same-ts deltas DO apply (last writer wins among equals).
+        idx.apply_behavior(
+            "curio:x",
+            &BehaviorDelta {
+                starred: Some(true),
+                activity_ts: Some("2026-07-02T10:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        let stats = idx.behavior("curio:x").expect("row").expect("present");
+        assert!(stats.starred, "an equal-ts flag write applies");
     }
 
     #[test]

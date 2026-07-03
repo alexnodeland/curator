@@ -566,6 +566,56 @@ mod tests {
         );
     }
 
+    /// Regression: an older-dated event file appearing AFTER newer files
+    /// were folded (device re-sync, restored backup) folds its events —
+    /// but its stale flag values must not clobber the newer state, and
+    /// last_activity must not roll back.
+    #[test]
+    fn backfilled_older_file_cannot_replay_stale_flags() {
+        run_scenario(
+            "backfill",
+            vec![
+                Step {
+                    write: vec![(
+                        "events-20260702.jsonl",
+                        ev(
+                            1,
+                            "2026-07-02T10:00:00.000Z",
+                            "article.unstarred",
+                            id_only(ID_A),
+                        ),
+                    )],
+                    remove: vec![],
+                    expect_report: report(1, 1, 0, 0, 0, 0),
+                    expect_behavior: vec![(
+                        "curio:0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d",
+                        stats(0, false, false, "2026-07-02T10:00:00.000Z"),
+                    )],
+                },
+                // A June file materializes late; it is read from the top
+                // (no cursor) and its star folds — as a COUNTED event,
+                // not as a flag rollback.
+                Step {
+                    write: vec![(
+                        "events-20260601.jsonl",
+                        ev(
+                            2,
+                            "2026-06-01T09:00:00.000Z",
+                            "article.starred",
+                            with_tags(ID_A),
+                        ),
+                    )],
+                    remove: vec![],
+                    expect_report: report(2, 1, 0, 0, 0, 0),
+                    expect_behavior: vec![(
+                        "curio:0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d",
+                        stats(0, false, false, "2026-07-02T10:00:00.000Z"),
+                    )],
+                },
+            ],
+        );
+    }
+
     #[test]
     fn malformed_lines_warn_skip_and_never_refold() {
         let content = [
