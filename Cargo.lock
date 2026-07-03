@@ -1496,7 +1496,10 @@ dependencies = [
  "kp-librarian",
  "kp-mcp",
  "kp-zotero",
+ "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

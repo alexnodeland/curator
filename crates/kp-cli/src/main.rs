@@ -2,14 +2,17 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use kp_core::KpConfig;
-use kp_index::{Embedder, HashEmbedder};
+use kp_index::{Embedder, embedder_from_config};
+use kp_mcp::KpEngine;
+use kp_mcp::types::{NoteKind, SearchMode};
 
 /// Subcommands the v1 CLI grows into (per `docs/design/architecture.md`).
-const COMMANDS: [&str; 12] = [
-    "init", "ingest", "index", "reindex", "search", "mcp", "propose", "review", "apply", "digest",
-    "status", "zotero",
+const COMMANDS: [&str; 15] = [
+    "init", "ingest", "index", "reindex", "search", "get", "related", "recent", "mcp", "propose",
+    "review", "apply", "digest", "status", "zotero",
 ];
 
 const USAGE: &str = "kp — the Knowledge Plane
@@ -23,7 +26,10 @@ Commands:
   reindex         alias for `index rebuild`
   zotero sync     two-channel Zotero sync into the vault (delta + fulltext)
   search          hybrid retrieval from the terminal
-  mcp             serve the MCP surface (stdio default)
+  get             one note by id (any namespace) — content + metadata
+  related         embedding-nearest notes to a note
+  recent          recently ingested/changed notes
+  mcp serve       serve the MCP surface (stdio default; --http + bearer)
   propose         create a proposals/v1 changeset
   review          render a proposal for human review
   apply           validate and apply a proposal
@@ -38,6 +44,19 @@ Options (zotero sync):
   --dir <path>          vault-relative notes dir (default: zotero)
   --no-fulltext         skip the fulltext pass
   --fulltext-cap <n>    fulltext truncation cap, characters (default: 20000)
+
+Options (search / get / related / recent):
+  --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
+  --json           print the MCP-shaped JSON output
+  --k <n>          result count (search, related; default 10)
+  --mode <m>       search mode: hybrid | vector | fts (default hybrid)
+  --days <n>       look-back window in days (recent; default 7)
+  --kind <ns>      identity-namespace filter: curio | zotero | kp | path
+
+Options (mcp serve):
+  --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
+  --http           streamable HTTP on [mcp].http_bind — REQUIRES the bearer
+                   token env named by [mcp].bearer_token_env
 
 Options:
   -h, --help       show this help
@@ -70,6 +89,17 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Some("search") => run_or_fail(cmd_search(&args[1..])),
+        Some("get") => run_or_fail(cmd_get(&args[1..])),
+        Some("related") => run_or_fail(cmd_related(&args[1..])),
+        Some("recent") => run_or_fail(cmd_recent(&args[1..])),
+        Some("mcp") => match args.get(1).map(String::as_str) {
+            Some("serve") => run_or_fail(cmd_mcp_serve(&args[2..])),
+            other => {
+                eprintln!("kp mcp: unknown subcommand {other:?} — try `kp mcp serve`");
+                ExitCode::from(2)
+            }
+        },
         Some(cmd) if COMMANDS.contains(&cmd) => {
             eprintln!("kp {cmd}: not implemented yet (pre-release scaffold)");
             ExitCode::from(2)
@@ -89,6 +119,13 @@ fn run_or_fail(result: Result<(), String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn load_config(config_path: Option<PathBuf>) -> Result<KpConfig, String> {
+    let config_path = config_path
+        .or_else(|| std::env::var_os("KP_CONFIG").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("kp.toml"));
+    KpConfig::load(&config_path).map_err(|e| e.to_string())
 }
 
 /// Shared flags of the batch commands.
@@ -111,23 +148,249 @@ fn parse_batch_args(args: &[String]) -> Result<BatchArgs, String> {
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
-    let config_path = config_path
-        .or_else(|| std::env::var_os("KP_CONFIG").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("kp.toml"));
-    let config = KpConfig::load(&config_path).map_err(|e| e.to_string())?;
+    let config = load_config(config_path)?;
     Ok(BatchArgs { config, json })
 }
 
 /// The embedder named by `[index].embedder`.
 fn embedder_for(config: &KpConfig) -> Result<Box<dyn Embedder>, String> {
-    match config.index.embedder.as_str() {
-        "hash" => Ok(Box::new(HashEmbedder::default())),
-        "builtin" => Ok(Box::new(kp_index::FastEmbedder::from_config(config))),
+    embedder_from_config(config).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Query commands — thin shells over kp-mcp's KpEngine, the SAME layer the
+// MCP tools ride, so `kp search` and `kp_search` cannot drift apart.
+// ---------------------------------------------------------------------------
+
+/// Flags shared by search / get / related / recent, plus positionals.
+struct QueryArgs {
+    config_path: Option<PathBuf>,
+    json: bool,
+    k: Option<u32>,
+    mode: Option<SearchMode>,
+    days: Option<u32>,
+    kind: Option<NoteKind>,
+    positional: Vec<String>,
+}
+
+fn parse_query_args(args: &[String]) -> Result<QueryArgs, String> {
+    let mut out = QueryArgs {
+        config_path: None,
+        json: false,
+        k: None,
+        mode: None,
+        days: None,
+        kind: None,
+        positional: Vec::new(),
+    };
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                let value = it.next().ok_or("--config needs a path")?;
+                out.config_path = Some(PathBuf::from(value));
+            }
+            "--json" => out.json = true,
+            "--k" => {
+                let value = it.next().ok_or("--k needs a number")?;
+                out.k = Some(value.parse().map_err(|e| format!("--k {value:?}: {e}"))?);
+            }
+            "--mode" => {
+                let value = it.next().ok_or("--mode needs hybrid|vector|fts")?;
+                out.mode = Some(match value.as_str() {
+                    "hybrid" => SearchMode::Hybrid,
+                    "vector" => SearchMode::Vector,
+                    "fts" => SearchMode::Fts,
+                    other => return Err(format!("unknown --mode {other:?} (hybrid|vector|fts)")),
+                });
+            }
+            "--days" => {
+                let value = it.next().ok_or("--days needs a number")?;
+                out.days = Some(
+                    value
+                        .parse()
+                        .map_err(|e| format!("--days {value:?}: {e}"))?,
+                );
+            }
+            "--kind" => {
+                let value = it.next().ok_or("--kind needs curio|zotero|kp|path")?;
+                out.kind = Some(match value.as_str() {
+                    "curio" => NoteKind::Curio,
+                    "zotero" => NoteKind::Zotero,
+                    "kp" => NoteKind::Kp,
+                    "path" => NoteKind::Path,
+                    other => {
+                        return Err(format!("unknown --kind {other:?} (curio|zotero|kp|path)"));
+                    }
+                });
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown argument {flag:?}")),
+            positional => out.positional.push(positional.to_owned()),
+        }
+    }
+    Ok(out)
+}
+
+fn engine_for(config_path: Option<PathBuf>) -> Result<KpEngine, String> {
+    let config = load_config(config_path)?;
+    KpEngine::from_config(config).map_err(|e| e.to_string())
+}
+
+fn print_json<T: serde::Serialize>(value: &T) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+fn cmd_search(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    if q.positional.is_empty() {
+        return Err("search needs a query — `kp search <query>`".to_owned());
+    }
+    let query = q.positional.join(" ");
+    let engine = engine_for(q.config_path)?;
+    let out = engine
+        .search(&query, q.k, q.mode)
+        .map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&out);
+    }
+    if out.results.is_empty() {
+        println!("no hits ({} mode)", out.mode);
+        return Ok(());
+    }
+    for hit in &out.results {
+        println!(
+            "{:>8.4}  {}  {} — {}",
+            hit.score, hit.id, hit.title, hit.path
+        );
+    }
+    Ok(())
+}
+
+fn cmd_get(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    let [id] = q.positional.as_slice() else {
+        return Err("get needs exactly one id — `kp get <id>`".to_owned());
+    };
+    let engine = engine_for(q.config_path)?;
+    let out = engine.get_note(id).map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&out);
+    }
+    println!("# {} ({})", out.title, out.id);
+    println!("path: {}", out.path);
+    if !out.frontmatter.tags.is_empty() {
+        println!("tags: {}", out.frontmatter.tags.join(", "));
+    }
+    if let Some(source) = &out.frontmatter.source {
+        println!("source: {source}");
+    }
+    println!("ingested: {}", out.index.ingested_at);
+    println!();
+    println!("{}", out.content);
+    Ok(())
+}
+
+fn cmd_related(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    let [id] = q.positional.as_slice() else {
+        return Err("related needs exactly one id — `kp related <id>`".to_owned());
+    };
+    let engine = engine_for(q.config_path)?;
+    let out = engine.related(id, q.k).map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&out);
+    }
+    if out.results.is_empty() {
+        println!("no related notes");
+        return Ok(());
+    }
+    for hit in &out.results {
+        println!(
+            "{:>8.4}  {}  {} — {}",
+            hit.score, hit.id, hit.title, hit.path
+        );
+    }
+    Ok(())
+}
+
+fn cmd_recent(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
+    if !q.positional.is_empty() {
+        return Err(format!("unexpected argument {:?}", q.positional[0]));
+    }
+    let engine = engine_for(q.config_path)?;
+    let out = engine.recent(q.days, q.kind).map_err(|e| e.to_string())?;
+    if q.json {
+        return print_json(&out);
+    }
+    if out.notes.is_empty() {
+        println!("nothing ingested in the last {} day(s)", out.days);
+        return Ok(());
+    }
+    for note in &out.notes {
+        println!(
+            "{}  {}  {} — {}",
+            note.ingested_at, note.id, note.title, note.path
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MCP serving
+// ---------------------------------------------------------------------------
+
+fn cmd_mcp_serve(args: &[String]) -> Result<(), String> {
+    let mut config_path: Option<PathBuf> = None;
+    let mut http = false;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--config" => {
+                let value = it.next().ok_or("--config needs a path")?;
+                config_path = Some(PathBuf::from(value));
+            }
+            "--http" => http = true,
+            other => return Err(format!("unknown argument {other:?}")),
+        }
+    }
+    let config = load_config(config_path)?;
+    let transport = if http {
+        "http"
+    } else {
+        config.mcp.transport.as_str()
+    };
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    match transport {
+        "stdio" => {
+            let engine = Arc::new(KpEngine::from_config(config).map_err(|e| e.to_string())?);
+            runtime
+                .block_on(kp_mcp::serve_stdio(engine))
+                .map_err(|e| e.to_string())
+        }
+        "http" => {
+            // Contract binding rule 4: no unauthenticated network mode —
+            // resolve the bearer token BEFORE binding anything.
+            let token = kp_mcp::resolve_bearer_token(&config.mcp).map_err(|e| e.to_string())?;
+            let bind = config.mcp.http_bind.clone();
+            let engine = Arc::new(KpEngine::from_config(config).map_err(|e| e.to_string())?);
+            runtime
+                .block_on(kp_mcp::serve_http(engine, &bind, &token))
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!(
-            "unknown [index].embedder {other:?} (expected \"builtin\" or \"hash\")"
+            "unknown [mcp].transport {other:?} (expected \"stdio\" or \"http\")"
         )),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Batch commands (ingest / rebuild / zotero)
+// ---------------------------------------------------------------------------
 
 fn cmd_ingest(args: &[String]) -> Result<(), String> {
     let batch = parse_batch_args(args)?;
@@ -186,10 +449,7 @@ fn cmd_zotero_sync(args: &[String]) -> Result<(), String> {
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
-    let config_path = config_path
-        .or_else(|| std::env::var_os("KP_CONFIG").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("kp.toml"));
-    let config = KpConfig::load(&config_path).map_err(|e| e.to_string())?;
+    let config = load_config(config_path)?;
     let embedder = embedder_for(&config)?;
 
     // The version cursor lives in kp-index — open the db, creating epoch 1
