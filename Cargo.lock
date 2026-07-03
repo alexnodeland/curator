@@ -1554,7 +1554,13 @@ version = "0.1.0"
 dependencies = [
  "kp-core",
  "kp-index",
+ "kp-ingest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
