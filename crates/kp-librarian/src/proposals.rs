@@ -15,7 +15,9 @@
 //!    `.curio/manifest.json` ownership oracle (kp-ingest);
 //! 3. any path escaping the vault (absolute, `..`, symlink) — rejected;
 //! 4. patches that do not apply cleanly (strict, zero fuzz) — rejected;
-//! 5. new notes whose identity duplicates an existing identity — rejected.
+//! 5. new notes whose identity — the explicit `kp_id`, or the implicit
+//!    `path:<relpath>` identity of a plain note (kp-note/v1: identity is
+//!    never absent) — duplicates an existing identity — rejected.
 
 use std::collections::BTreeSet;
 
@@ -42,7 +44,10 @@ pub enum ApplyError {
     /// validation — nothing was stamped).
     #[error(transparent)]
     Store(#[from] ProposalStoreError),
-    /// Vault I/O failed mid-write (environment, not validation).
+    /// Vault I/O failed mid-write (environment, not validation). Files
+    /// written before the failure are reverted (best-effort), and the
+    /// proposal stays `open` so a retry re-validates against the
+    /// unchanged tree.
     #[error(transparent)]
     Vault(#[from] VaultError),
 }
@@ -84,14 +89,12 @@ pub fn apply_proposal(
     };
     match validate_and_stage(vault, &proposal, &patch, manifest.as_ref()) {
         Ok(staged) => {
-            for (path, content) in &staged {
-                vault.write_atomic(path, content)?;
-            }
+            write_all_or_revert(vault, &staged)?;
             store_proposal_status(vault, proposals_dir, &mut proposal, ProposalStatus::Applied)?;
             Ok(ApplyReport {
                 id: proposal.id,
                 title: proposal.title,
-                files_written: staged.into_iter().map(|(path, _)| path).collect(),
+                files_written: staged.into_iter().map(|w| w.path).collect(),
                 status: "applied".to_owned(),
             })
         }
@@ -110,21 +113,66 @@ pub fn apply_proposal(
     }
 }
 
+/// One validated write, staged in memory: the target path, its complete
+/// new content, and the file's prior content (`None` = the patch creates
+/// it) — enough to revert if a later write in the same apply fails.
+#[derive(Debug)]
+struct StagedWrite {
+    path: String,
+    content: String,
+    prior: Option<String>,
+}
+
+/// Write every staged file, atomically each; if any write fails, revert
+/// the files already written (restore prior content / remove creations)
+/// so the apply stays all-or-nothing even against environment failures
+/// (ENOSPC, permissions, a parent path turning out unwritable).
+fn write_all_or_revert(vault: &Vault, staged: &[StagedWrite]) -> Result<(), VaultError> {
+    for (i, w) in staged.iter().enumerate() {
+        if let Err(err) = vault.write_atomic(&w.path, &w.content) {
+            revert_written(vault, &staged[..i]);
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
+/// Best-effort rollback of already-written staged files, newest first. A
+/// file that cannot be restored is warned about — never silently left.
+fn revert_written(vault: &Vault, written: &[StagedWrite]) {
+    for w in written.iter().rev() {
+        let failure = match &w.prior {
+            Some(old) => vault
+                .write_atomic(&w.path, old)
+                .err()
+                .map(|e| e.to_string()),
+            None => match vault.resolve(&w.path) {
+                Ok(path) => std::fs::remove_file(&path).err().map(|e| e.to_string()),
+                Err(e) => Some(e.to_string()),
+            },
+        };
+        if let Some(err) = failure {
+            tracing::warn!(path = %w.path, %err,
+                "rollback of a partially-applied proposal could not restore this file");
+        }
+    }
+}
+
 /// The pure validator: parse, check every rule, and stage the resulting
-/// `(path, new content)` writes WITHOUT touching the vault. `Err` is the
-/// human-readable hard-reject reason.
+/// writes WITHOUT touching the vault. `Err` is the human-readable
+/// hard-reject reason.
 fn validate_and_stage(
     vault: &Vault,
     proposal: &Proposal,
     patch: &str,
     manifest: Option<&CurioManifest>,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<Vec<StagedWrite>, String> {
     let file_patches = parse_patch(patch).map_err(|e| e.to_string())?;
     if file_patches.is_empty() {
         return Err("changes.patch contains no file patches".to_owned());
     }
     let declared: BTreeSet<&str> = proposal.files.iter().map(String::as_str).collect();
-    let mut staged: Vec<(String, String)> = Vec::new();
+    let mut staged: Vec<StagedWrite> = Vec::new();
     let mut new_identities: Vec<(String, String)> = Vec::new(); // (kp_id, path)
 
     for fp in &file_patches {
@@ -139,7 +187,7 @@ fn validate_and_stage(
                 "changes.patch touches {path}, which proposal.json does not declare"
             ));
         }
-        if staged.iter().any(|(p, _)| p == path) {
+        if staged.iter().any(|w| w.path == *path) {
             return Err(format!("duplicate file patch for {path}"));
         }
         // Rules 1 + 3: dot-dir policy, then vault path safety.
@@ -175,11 +223,13 @@ fn validate_and_stage(
         }
 
         // Rule 5 (first half): collect the identities this proposal mints.
+        // Per kp-note/v1 an identity is never absent — a plain new note
+        // carries the implicit `path:<relpath>` identity, which collides
+        // exactly like an explicit `kp_id` does.
         if old.is_none()
             && let Ok(note) = Note::parse(path.as_str(), &new_content)
-            && let Frontmatter::Kp(fm) = &note.frontmatter
         {
-            let kp_id = fm.kp_id.to_string();
+            let kp_id = note.kp_id().to_string();
             if let Some((_, first)) = new_identities.iter().find(|(id, _)| *id == kp_id) {
                 return Err(format!(
                     "duplicate identity {kp_id} minted twice in one proposal ({first}, {path})"
@@ -187,7 +237,11 @@ fn validate_and_stage(
             }
             new_identities.push((kp_id, path.clone()));
         }
-        staged.push((path.clone(), new_content));
+        staged.push(StagedWrite {
+            path: path.clone(),
+            content: new_content,
+            prior: old,
+        });
     }
 
     // Rule 5 (second half): no minted identity may collide with a note
@@ -206,18 +260,18 @@ fn validate_and_stage(
     Ok(staged)
 }
 
-/// Every `(kp_id, path)` the vault currently holds, from explicit
-/// frontmatter identities. Unparseable notes are skipped — a broken file
-/// cannot claim an identity.
+/// Every `(kp_id, path)` the vault currently holds — explicit
+/// frontmatter identities AND the implicit `path:<relpath>` identity of
+/// plain/foreign notes (kp-note/v1: identity is never absent, so a
+/// minted `path:` id can collide with a plain note too). Unparseable
+/// notes are skipped — a broken file cannot claim an identity.
 fn vault_identities(vault: &Vault) -> Result<Vec<(String, String)>, VaultError> {
     let mut out = Vec::new();
     for path in vault.note_paths()? {
         let Ok(note) = vault.read_note(&path) else {
             continue;
         };
-        if let Frontmatter::Kp(fm) = &note.frontmatter {
-            out.push((fm.kp_id.to_string(), path));
-        }
+        out.push((note.kp_id().to_string(), path));
     }
     Ok(out)
 }
@@ -549,6 +603,80 @@ mod tests {
             "got {err}"
         );
         assert!(!vault.root().join("new.md").exists());
+    }
+
+    #[test]
+    fn duplicate_implicit_path_identity_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        // A PLAIN note holds the implicit identity path:existing.md.
+        vault
+            .write_atomic("existing.md", "# Plain\n\nno frontmatter\n")
+            .expect("seed");
+        // A new note explicitly claiming that implicit identity collides.
+        let p = propose(
+            &vault,
+            &[(
+                "new.md",
+                "---\nkp_id: \"path:existing.md\"\nkp_schema: kp-note/v1\ntitle: N\n---\nbody\n",
+            )],
+        );
+        let err = apply_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
+        assert!(
+            matches!(err, ApplyError::Rejected { ref reason, .. } if reason.contains("duplicates existing identity")),
+            "got {err}"
+        );
+        assert!(!vault.root().join("new.md").exists());
+
+        // Within one proposal: a plain new file's implicit path: identity
+        // collides with another new file explicitly claiming it.
+        let p = propose(
+            &vault,
+            &[
+                ("idea.md", "# Idea\n"),
+                (
+                    "other.md",
+                    "---\nkp_id: \"path:idea.md\"\nkp_schema: kp-note/v1\ntitle: O\n---\nbody\n",
+                ),
+            ],
+        );
+        let err = apply_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
+        assert!(
+            matches!(err, ApplyError::Rejected { ref reason, .. } if reason.contains("minted twice")),
+            "got {err}"
+        );
+        assert!(!vault.root().join("idea.md").exists());
+        assert!(!vault.root().join("other.md").exists());
+    }
+
+    #[test]
+    fn mid_write_failure_reverts_and_leaves_the_proposal_open() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        vault.write_atomic("a.md", "original\n").expect("seed");
+        // "sub" is a regular FILE, so creating sub/two.md passes
+        // validation (nothing checks parents) but fails at write time —
+        // an environment failure, not a validation reject.
+        std::fs::write(vault.root().join("sub"), "in the way").expect("plant");
+        let p = propose(
+            &vault,
+            &[("a.md", "rewritten\n"), ("sub/two.md", "new file\n")],
+        );
+
+        let err = apply_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
+        assert!(matches!(err, ApplyError::Vault(_)), "got {err}");
+        // All-or-nothing: the first write was reverted…
+        assert_eq!(vault.read("a.md").expect("read"), "original\n");
+        // …and the proposal is still open (NOT stamped rejected), so a
+        // retry after fixing the environment succeeds.
+        let listed = list_proposals(&vault, ".kp/proposals").expect("lists");
+        assert_eq!(listed[0].status, ProposalStatus::Open);
+
+        std::fs::remove_file(vault.root().join("sub")).expect("unplant");
+        let report = apply_proposal(&vault, ".kp/proposals", &p.id).expect("retry applies");
+        assert_eq!(report.files_written, vec!["a.md", "sub/two.md"]);
+        assert_eq!(vault.read("a.md").expect("read"), "rewritten\n");
+        assert_eq!(vault.read("sub/two.md").expect("read"), "new file\n");
     }
 
     #[test]
