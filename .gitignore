@@ -1,0 +1,11 @@
+# Rust build artifacts
+target/
+
+# macOS
+.DS_Store
+
+# Derived stores are disposable — never committed
+*.db
+
+# Knowledge Plane local state (proposals staging, cursors)
+.kp/
