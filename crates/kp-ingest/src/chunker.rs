@@ -41,24 +41,53 @@ impl Block {
     }
 }
 
-/// True for an ATX heading: 1–6 `#` followed by space/tab or end of line.
+/// The line with up to 3 leading spaces stripped, or `None` when the
+/// line sits in indented-code territory (4+ spaces or a leading tab) —
+/// per CommonMark such lines can be neither ATX headings nor fence
+/// delimiters, so a code sample containing `# x` or ` ``` ` as indented
+/// content must not split chunks or open a pseudo-fence.
+fn block_start(line: &str) -> Option<&str> {
+    let mut spaces = 0;
+    for c in line.chars() {
+        match c {
+            ' ' => {
+                spaces += 1;
+                if spaces > 3 {
+                    return None;
+                }
+            }
+            '\t' => return None,
+            _ => break,
+        }
+    }
+    Some(&line[spaces..])
+}
+
+/// True for an ATX heading: ≤3 spaces of indentation, then 1–6 `#`
+/// followed by space/tab or end of line.
 fn is_heading(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+    let Some(rest) = block_start(line) else {
+        return false;
+    };
+    let hashes = rest.chars().take_while(|c| *c == '#').count();
     if hashes == 0 || hashes > 6 {
         return false;
     }
-    matches!(trimmed[hashes..].chars().next(), None | Some(' ' | '\t'))
+    matches!(rest[hashes..].chars().next(), None | Some(' ' | '\t'))
 }
 
-/// A fence opener: at least three backticks or tildes. Returns the fence
-/// character and run length (the closer must use the same character, at
-/// least as many, per CommonMark).
+/// A fence opener: ≤3 spaces of indentation, then at least three
+/// backticks or tildes. Returns the fence character and run length (the
+/// closer must use the same character, at least as many, per
+/// CommonMark). A backtick fence's info string may not contain further
+/// backticks — that is what keeps a prose line like
+/// ``` ```inline`` code ``` from swallowing the rest of the document as
+/// an unterminated pseudo-fence.
 fn fence_open(line: &str) -> Option<(char, usize)> {
-    let trimmed = line.trim_start();
+    let rest = block_start(line)?;
     for c in ['`', '~'] {
-        let run = trimmed.chars().take_while(|x| *x == c).count();
-        if run >= 3 {
+        let run = rest.chars().take_while(|x| *x == c).count();
+        if run >= 3 && (c == '~' || !rest[run..].contains('`')) {
             return Some((c, run));
         }
     }
@@ -66,9 +95,11 @@ fn fence_open(line: &str) -> Option<(char, usize)> {
 }
 
 fn fence_closes(line: &str, open: (char, usize)) -> bool {
-    let trimmed = line.trim_start();
-    let run = trimmed.chars().take_while(|x| *x == open.0).count();
-    run >= open.1 && trimmed[run..].trim().is_empty()
+    let Some(rest) = block_start(line) else {
+        return false;
+    };
+    let run = rest.chars().take_while(|x| *x == open.0).count();
+    run >= open.1 && rest[run..].trim().is_empty()
 }
 
 /// Phase A: split markdown into heading / fence / text blocks.
@@ -376,6 +407,56 @@ after text
         assert!(is_heading("# real"));
         assert!(is_heading("###"));
         assert!(is_heading("  ## indented"));
+        assert!(is_heading("   ### three spaces is still a heading"));
+        // CommonMark: 4+ spaces (or a tab) is indented code, not a heading.
+        assert!(!is_heading("    # code sample"));
+        assert!(!is_heading("\t# code sample"));
+    }
+
+    /// Regression: prose containing inline triple-backticks, and 4-space
+    /// indented code whose lines start with ``` , must not open a
+    /// pseudo-fence that swallows the rest of the document into one
+    /// atomic chunk (per CommonMark a backtick fence's info string may
+    /// not contain backticks, and fences are indented at most 3 spaces).
+    #[test]
+    fn inline_backticks_and_indented_fences_do_not_open_fences() {
+        assert_eq!(fence_open("```inline``` code in prose"), None);
+        assert_eq!(fence_open("    ```"), None, "indented code, not a fence");
+        assert_eq!(fence_open("\t```"), None);
+        assert_eq!(fence_open("```rust"), Some(('`', 3)));
+        assert_eq!(fence_open("   ```rust"), Some(('`', 3)));
+        // Tilde fences MAY carry backticks in the info string.
+        assert_eq!(fence_open("~~~foo`bar"), Some(('~', 3)));
+        // A 4-space-indented run does not CLOSE an open fence either.
+        assert!(!fence_closes("    ```", ('`', 3)));
+        assert!(fence_closes("```", ('`', 3)));
+
+        // End to end: headings after the inline-backtick line keep
+        // partitioning — nothing was swallowed.
+        let md = "\
+Use ```code``` for inline literals one two.
+
+# Alpha
+
+alpha body three four
+
+    ```
+    indented code, not a fence
+    ```
+
+# Beta
+
+beta body five six
+";
+        let got = chunk_texts(md, params(64, 8));
+        assert!(
+            got.iter().any(|c| c.starts_with("# Alpha")),
+            "Alpha must open its own chunk: {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c.starts_with("# Beta")),
+            "Beta must open its own chunk: {got:?}"
+        );
     }
 
     #[test]
