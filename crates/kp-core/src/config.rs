@@ -187,6 +187,25 @@ mod tests {
     }
 
     #[test]
+    fn the_shipped_example_matches_the_contract_defaults() {
+        // kp.example.toml at the repo root IS kp-config/v1's worked example;
+        // this test pins it to the model (and the model's defaults) forever.
+        let raw = include_str!("../../../kp.example.toml");
+        let cfg = KpConfig::from_toml_str(raw).expect("example must parse");
+        assert_eq!(cfg.schema, KP_CONFIG_SCHEMA);
+        let defaults = KpConfig {
+            schema: KP_CONFIG_SCHEMA.to_owned(),
+            vault: VaultConfig::default(),
+            index: IndexConfig::default(),
+            curio: CurioConfig::default(),
+            zotero: ZoteroConfig::default(),
+            librarian: LibrarianConfig::default(),
+            mcp: McpConfig::default(),
+        };
+        assert_eq!(cfg, defaults, "example file drifted from contract defaults");
+    }
+
+    #[test]
     fn unknown_keys_never_fail() {
         let raw = "schema = \"kp-config/v1\"\nfuture_key = true\n\n[vault]\npath = \"/tmp/v\"\nfrom_v2 = 3\n";
         let cfg = KpConfig::from_toml_str(raw).expect("unknown keys must not fail");
