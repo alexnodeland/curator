@@ -567,6 +567,26 @@ impl IndexReader {
     pub fn behavior(&self, kp_id: &str) -> Result<Option<BehaviorStats>, IndexError> {
         behavior_row(&self.conn, kp_id)
     }
+
+    /// Every `(file, line)` cursor a consumer holds — the reader twin of
+    /// [`Index::cursors_for`] (`kp doctor` inspects tail health without a
+    /// writer handle).
+    pub fn cursors_for(&self, consumer: &str) -> Result<Vec<(String, i64)>, IndexError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file, line FROM cursors WHERE consumer = ?1 ORDER BY file")?;
+        let rows = stmt
+            .query_map(params![consumer], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Number of indexed notes.
+    pub fn note_count(&self) -> Result<i64, IndexError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?)
+    }
 }
 
 /// Shared behavior-rollup lookup (writer and reader connections).
@@ -1197,8 +1217,16 @@ mod tests {
         let (mut idx, e) = tmp_index(dir.path());
         idx.upsert_note(&note("a.md", "hello reader"), &e, ChunkParams::default())
             .expect("insert");
+        idx.set_cursor("c", "events-20260701.jsonl", 7)
+            .expect("set");
         let reader = idx.reader().expect("reader");
         assert_eq!(reader.meta(), idx.meta());
+        // Reader twins mirror the writer's view.
+        assert_eq!(reader.note_count().expect("count"), 1);
+        assert_eq!(
+            reader.cursors_for("c").expect("list"),
+            vec![("events-20260701.jsonl".to_owned(), 7)]
+        );
         // Read-only connection really is read-only.
         assert!(reader.conn.execute("DELETE FROM notes", []).is_err());
         // And WAL lets it read while the writer holds changes.
