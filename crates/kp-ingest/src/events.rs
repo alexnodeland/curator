@@ -20,7 +20,11 @@
 //! - **negation**: folding honors negation events (unstar, read-later
 //!   removal) — histories are not monotone;
 //! - **malformed lines**: warn + skip, never crash; the cursor still
-//!   advances past them.
+//!   advances past them;
+//! - **torn tail**: an unterminated final line (the producer caught
+//!   mid-append) is left for the next pass — the cursor only advances
+//!   past newline-terminated lines, so a half-written event is never
+//!   consumed (and never lost once its newline lands).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -79,8 +83,18 @@ pub fn tail_events(
             source,
         })?;
         let start = index.cursor(EVENTS_CONSUMER, name)?.unwrap_or(0);
+        // A JSONL producer appends one `line\n` per event, but a read can
+        // still catch the final line mid-write (no trailing newline yet).
+        // That torn fragment is NOT consumed and the cursor never advances
+        // past it — otherwise the completed event would be skipped forever
+        // on the next pass (it would sit at a line number <= the cursor).
+        let terminated = if content.ends_with('\n') {
+            content.lines().count()
+        } else {
+            content.lines().count().saturating_sub(1)
+        };
         let mut line_no: i64 = 0;
-        for line in content.lines() {
+        for line in content.lines().take(terminated) {
             line_no += 1;
             if line_no <= start {
                 continue;
@@ -264,6 +278,12 @@ mod tests {
 
         for (i, step) in steps.into_iter().enumerate() {
             for (file, content) in &step.write {
+                // Contract-shaped JSONL: every event line is terminated.
+                // (The torn-tail test writes its file directly.)
+                let mut content = content.clone();
+                if !content.is_empty() && !content.ends_with('\n') {
+                    content.push('\n');
+                }
                 std::fs::write(events.join(file), content).expect("write");
             }
             for file in &step.remove {
@@ -589,6 +609,68 @@ mod tests {
                 },
             ],
         );
+    }
+
+    /// Regression: a read that catches the producer mid-append (an
+    /// unterminated final line) must neither count the fragment as
+    /// malformed nor advance the cursor past it — once the newline lands
+    /// the completed event still folds.
+    #[test]
+    fn torn_final_line_is_left_for_the_next_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let events = dir.path().join("events");
+        std::fs::create_dir_all(&events).expect("mkdir");
+        let embedder = HashEmbedder::new(16);
+        let mut index = Index::create(dir.path().join("index.db"), &embedder, 1).expect("create");
+        let adapter = CurioAdapter::new();
+        let file = events.join("events-20260701.jsonl");
+
+        let complete = ev(
+            1,
+            "2026-07-01T09:00:00.000Z",
+            "article.opened",
+            id_only(ID_A),
+        );
+        let second = ev(
+            2,
+            "2026-07-01T09:05:00.000Z",
+            "article.starred",
+            with_tags(ID_A),
+        );
+        // The producer has written event 1 fully and HALF of event 2.
+        let torn = &second[..second.len() / 2];
+        std::fs::write(&file, format!("{complete}\n{torn}")).expect("write torn");
+
+        let report = tail_events(&events, &adapter, &mut index).expect("tail");
+        assert_eq!(
+            report,
+            super::TailReport {
+                files: 1,
+                folded: 1,
+                ..Default::default()
+            },
+            "the torn fragment is neither folded nor counted malformed"
+        );
+        assert_eq!(
+            index
+                .cursor(EVENTS_CONSUMER, "events-20260701.jsonl")
+                .expect("cursor"),
+            Some(1),
+            "the cursor must stop at the last terminated line"
+        );
+
+        // The producer finishes the append; the completed event folds.
+        std::fs::write(&file, format!("{complete}\n{second}\n")).expect("complete");
+        let report = tail_events(&events, &adapter, &mut index).expect("tail");
+        assert_eq!(report.folded, 1, "the completed event is not lost");
+        assert_eq!(report.duplicates, 0);
+        assert_eq!(report.malformed, 0);
+        let stats = index
+            .behavior("curio:0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d")
+            .expect("query")
+            .expect("row");
+        assert!(stats.starred, "the once-torn star event folded");
+        assert_eq!(stats.opened_count, 1);
     }
 
     #[test]
