@@ -1,0 +1,11 @@
+//! Knowledge Plane index.
+//!
+//! All derived retrieval state lives in ONE embedded SQLite file
+//! (`index.db`): vectors (sqlite-vec), full-text (FTS5), and a relational
+//! edge graph. The whole file is disposable — blue/green epoch rebuilds,
+//! never migrations. Everything in this crate is INTERNAL (not a published
+//! contract) and may change freely.
+
+pub mod embed;
+
+pub use embed::{Embedder, HashEmbedder};

@@ -1,0 +1,22 @@
+[package]
+name = "kp-cli"
+description = "The Knowledge Plane CLI (`kp`): init, ingest, reindex, search, mcp, propose/review/apply, digest, status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "kp"
+path = "src/main.rs"
+
+[dependencies]
+kp-core = { workspace = true }
+kp-index = { workspace = true }
+kp-ingest = { workspace = true }
+kp-zotero = { workspace = true }
+kp-mcp = { workspace = true }
+kp-librarian = { workspace = true }
+
+[lints]
+workspace = true

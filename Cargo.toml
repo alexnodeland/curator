@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kp-core",
+    "crates/kp-index",
+    "crates/kp-ingest",
+    "crates/kp-zotero",
+    "crates/kp-mcp",
+    "crates/kp-librarian",
+    "crates/kp-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+# Pre-release: nothing is published to crates.io yet.
+publish = false
+# NOTE: no `license` field — the license is deliberately undecided (see README).
+
+[workspace.dependencies]
+# Intra-workspace crates (dependency direction is strictly downward:
+# kp-cli -> {kp-ingest, kp-zotero, kp-mcp, kp-librarian} -> kp-index -> kp-core).
+kp-core = { path = "crates/kp-core" }
+kp-index = { path = "crates/kp-index" }
+kp-ingest = { path = "crates/kp-ingest" }
+kp-zotero = { path = "crates/kp-zotero" }
+kp-mcp = { path = "crates/kp-mcp" }
+kp-librarian = { path = "crates/kp-librarian" }
+
+# Shared third-party deps.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.9"
+
+[workspace.lints.rust]
+# Relax to a scoped `deny` + local `allow` ONLY if sqlite-vec FFI registration
+# truly requires unsafe, with a comment at the site explaining why.
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"

@@ -1,0 +1,15 @@
+[package]
+name = "kp-zotero"
+description = "Knowledge Plane Zotero producer: two-channel read-only access (Web API metadata deltas + /fulltext, CRC-verified WebDAV fallback)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+kp-core = { workspace = true }
+kp-index = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
