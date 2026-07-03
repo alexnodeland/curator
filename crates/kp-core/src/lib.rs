@@ -19,5 +19,9 @@ pub use checksum::{Checksum, ChecksumError};
 pub use config::{ConfigError, KpConfig};
 pub use id::{IdError, KpId};
 pub use note::{Frontmatter, Note, NoteError, NoteFrontmatter};
-pub use proposal::{Proposal, ProposalFile, ProposalStatus, ProposalWriteError, create_proposal};
+pub use proposal::{
+    Proposal, ProposalFile, ProposalStatus, ProposalStoreError, ProposalWriteError,
+    create_proposal, enforce_curio_preservation, is_curio_shaped, list_proposals, load_proposal,
+    proposal_rel_dir, store_proposal_status, validate_target_path,
+};
 pub use vault::{Vault, VaultError};

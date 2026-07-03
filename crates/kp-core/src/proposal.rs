@@ -161,8 +161,10 @@ pub fn create_proposal(
 
 /// Reject `.curio/**` (contract) and any other dot-directory-rooted path
 /// (stricter, see [`ProposalWriteError::DotPath`]). [`Vault::resolve`]
-/// covers absolute/traversal/symlink shapes separately.
-fn validate_target_path(path: &str) -> Result<(), ProposalWriteError> {
+/// covers absolute/traversal/symlink shapes separately. Public: the
+/// apply-side validator (kp-librarian) enforces the same policy on
+/// proposals it did not create.
+pub fn validate_target_path(path: &str) -> Result<(), ProposalWriteError> {
     let first = path.split('/').next().unwrap_or(path);
     if first == ".curio" {
         return Err(ProposalWriteError::CurioPath(path.to_owned()));
@@ -173,24 +175,49 @@ fn validate_target_path(path: &str) -> Result<(), ProposalWriteError> {
     Ok(())
 }
 
+/// Does this existing file content look Curio-owned? True when the body
+/// carries the managed-region markers or the frontmatter declares
+/// `schema: curio.frontmatter.v1`. (The `.curio/manifest.json` ownership
+/// oracle — kp-ingest — covers files this shape test cannot.)
+#[must_use]
+pub fn is_curio_shaped(path: &str, content: &str) -> bool {
+    let Ok(note) = Note::parse(path, content) else {
+        return false;
+    };
+    managed_block(&note.body).is_some()
+        || matches!(
+            &note.frontmatter,
+            Frontmatter::Foreign(yaml) if foreign_schema(yaml) == Some(CURIO_FRONTMATTER_SCHEMA)
+        )
+}
+
 /// Contract hard-reject 2: when the existing file is Curio's (managed
 /// markers in the body, or `schema: curio.frontmatter.v1` frontmatter),
 /// the new content must preserve the managed region byte-exact and keep
 /// every existing frontmatter key with its existing value — enrichment
 /// may only ADD keys and companion content.
 fn guard_curio_surface(path: &str, old: &str, new: &str) -> Result<(), ProposalWriteError> {
-    let Ok(old_note) = Note::parse(path, old) else {
-        return Ok(()); // unparseable old file: nothing Curio-shaped to protect
-    };
-    let old_managed = managed_block(&old_note.body);
-    let is_curio = old_managed.is_some()
-        || matches!(
-            &old_note.frontmatter,
-            Frontmatter::Foreign(yaml) if foreign_schema(yaml) == Some(CURIO_FRONTMATTER_SCHEMA)
-        );
-    if !is_curio {
+    if !is_curio_shaped(path, old) {
         return Ok(());
     }
+    enforce_curio_preservation(path, old, new)
+}
+
+/// The preservation rules themselves, applied UNCONDITIONALLY: the
+/// managed region (when present in `old`) must survive byte-exact, and
+/// every existing frontmatter key must keep its value — enrichment may
+/// only add keys and companion content. The create path runs this behind
+/// [`is_curio_shaped`]; the apply path also runs it for files the
+/// `.curio/manifest.json` ownership oracle claims.
+pub fn enforce_curio_preservation(
+    path: &str,
+    old: &str,
+    new: &str,
+) -> Result<(), ProposalWriteError> {
+    let Ok(old_note) = Note::parse(path, old) else {
+        return Ok(()); // unparseable old file: nothing to protect
+    };
+    let old_managed = managed_block(&old_note.body);
     let new_note = Note::parse(path, new).map_err(|e| ProposalWriteError::CurioOwnedEdit {
         path: path.to_owned(),
         reason: format!("replacement does not parse as a note: {e}"),
@@ -241,6 +268,117 @@ fn frontmatter_map(fm: &Frontmatter) -> serde_yaml::Mapping {
         }
     };
     serde_yaml::from_str(&yaml).unwrap_or_default()
+}
+
+/// Errors from reading/updating stored proposals.
+#[derive(Debug, thiserror::Error)]
+pub enum ProposalStoreError {
+    /// No proposal directory (or file) with this id.
+    #[error("no proposal {id} under {proposals_dir}")]
+    NotFound { proposals_dir: String, id: String },
+    /// `proposal.json` is not valid `proposals/v1` JSON.
+    #[error("malformed proposal.json for {id}: {source}")]
+    Malformed {
+        id: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The stored `schema` value is not `proposals/v1`.
+    #[error("proposal {id} declares unsupported schema {found:?}")]
+    UnsupportedSchema { id: String, found: String },
+    /// Vault access failed.
+    #[error(transparent)]
+    Vault(#[from] VaultError),
+    /// Serialization failed (never expected).
+    #[error("proposal serialization: {0}")]
+    Json(serde_json::Error),
+}
+
+/// The vault-relative directory of one proposal.
+#[must_use]
+pub fn proposal_rel_dir(proposals_dir: &str, id: &str) -> String {
+    format!("{}/{id}", proposals_dir.trim_end_matches('/'))
+}
+
+/// Load one stored proposal: `(proposal.json, changes.patch)`.
+pub fn load_proposal(
+    vault: &Vault,
+    proposals_dir: &str,
+    id: &str,
+) -> Result<(Proposal, String), ProposalStoreError> {
+    let dir = proposal_rel_dir(proposals_dir, id);
+    let not_found = || ProposalStoreError::NotFound {
+        proposals_dir: proposals_dir.to_owned(),
+        id: id.to_owned(),
+    };
+    let json = match vault.read(&format!("{dir}/proposal.json")) {
+        Ok(json) => json,
+        Err(VaultError::Io { .. }) => return Err(not_found()),
+        Err(e) => return Err(e.into()),
+    };
+    let proposal: Proposal =
+        serde_json::from_str(&json).map_err(|source| ProposalStoreError::Malformed {
+            id: id.to_owned(),
+            source,
+        })?;
+    if proposal.schema != PROPOSALS_SCHEMA {
+        return Err(ProposalStoreError::UnsupportedSchema {
+            id: id.to_owned(),
+            found: proposal.schema,
+        });
+    }
+    let patch = match vault.read(&format!("{dir}/changes.patch")) {
+        Ok(patch) => patch,
+        Err(VaultError::Io { .. }) => return Err(not_found()),
+        Err(e) => return Err(e.into()),
+    };
+    Ok((proposal, patch))
+}
+
+/// Every stored proposal, sorted by id (= creation order, ULIDs).
+/// Unreadable entries are skipped with a warning — one corrupt dir must
+/// not hide the rest of the queue.
+pub fn list_proposals(
+    vault: &Vault,
+    proposals_dir: &str,
+) -> Result<Vec<Proposal>, ProposalStoreError> {
+    let root = vault.resolve(proposals_dir)?;
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        // No proposals dir yet = empty queue, not an error.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut ids: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            ids.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    ids.sort();
+    let mut out = Vec::new();
+    for id in ids {
+        match load_proposal(vault, proposals_dir, &id) {
+            Ok((proposal, _)) => out.push(proposal),
+            Err(e) => tracing::warn!(%id, error = %e, "skipping unreadable proposal"),
+        }
+    }
+    Ok(out)
+}
+
+/// Stamp a status transition into `proposal.json` (atomic rewrite). The
+/// only writer of `status` after creation — agents never edit it.
+pub fn store_proposal_status(
+    vault: &Vault,
+    proposals_dir: &str,
+    proposal: &mut Proposal,
+    status: ProposalStatus,
+) -> Result<(), ProposalStoreError> {
+    proposal.status = status;
+    let mut json = serde_json::to_string_pretty(proposal).map_err(ProposalStoreError::Json)?;
+    json.push('\n');
+    let dir = proposal_rel_dir(proposals_dir, &proposal.id);
+    vault.write_atomic(&format!("{dir}/proposal.json"), &json)?;
+    Ok(())
 }
 
 /// One file's unified diff: `/dev/null` → `b/<path>` for creations,
@@ -543,6 +681,92 @@ mod tests {
             &[file("curio/a.md", &enriched)],
         )
         .expect("additive frontmatter enrichment is legal");
+    }
+
+    #[test]
+    fn store_helpers_load_list_and_stamp_status() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        // Empty queue before anything exists.
+        assert_eq!(
+            list_proposals(&vault, ".kp/proposals").expect("empty list"),
+            Vec::new()
+        );
+        assert!(matches!(
+            load_proposal(&vault, ".kp/proposals", "01MISSING").unwrap_err(),
+            ProposalStoreError::NotFound { .. }
+        ));
+
+        let a = create_proposal(
+            &vault,
+            ".kp/proposals",
+            "agent",
+            "first",
+            "r",
+            &[file("a.md", "alpha\n")],
+        )
+        .expect("creates");
+        let b = create_proposal(
+            &vault,
+            ".kp/proposals",
+            "agent",
+            "second",
+            "r",
+            &[file("b.md", "beta\n")],
+        )
+        .expect("creates");
+
+        let (loaded, patch) = load_proposal(&vault, ".kp/proposals", &a.id).expect("loads");
+        assert_eq!(loaded, a);
+        assert!(patch.contains("+++ b/a.md"));
+
+        let listed = list_proposals(&vault, ".kp/proposals").expect("lists");
+        assert_eq!(
+            listed.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec![a.id.as_str(), b.id.as_str()],
+            "sorted by ULID = creation order"
+        );
+
+        // Stamp a transition and read it back.
+        let mut stamped = loaded;
+        store_proposal_status(
+            &vault,
+            ".kp/proposals",
+            &mut stamped,
+            ProposalStatus::Applied,
+        )
+        .expect("stamps");
+        assert_eq!(stamped.status, ProposalStatus::Applied);
+        let (reloaded, _) = load_proposal(&vault, ".kp/proposals", &a.id).expect("reloads");
+        assert_eq!(reloaded.status, ProposalStatus::Applied);
+
+        // A corrupt sibling is skipped, not fatal.
+        vault
+            .write_atomic(".kp/proposals/01CORRUPT/proposal.json", "{nope")
+            .expect("seed corrupt");
+        let listed = list_proposals(&vault, ".kp/proposals").expect("lists");
+        assert_eq!(listed.len(), 2);
+    }
+
+    #[test]
+    fn curio_shape_detection_and_unconditional_preservation() {
+        // Shape detection: markers or the curio schema key.
+        assert!(is_curio_shaped("a.md", &curio_note("")));
+        assert!(is_curio_shaped(
+            "a.md",
+            "---\nschema: curio.frontmatter.v1\n---\nno markers\n"
+        ));
+        assert!(!is_curio_shaped("a.md", "---\ntitle: mine\n---\nplain\n"));
+
+        // Unconditional enforcement protects even unshaped files — the
+        // manifest-oracle path: frontmatter keys must survive.
+        let old = "---\ntitle: mine\n---\nbody\n";
+        assert!(
+            enforce_curio_preservation("a.md", old, "---\ntitle: mine\nextra: 1\n---\nx\n").is_ok()
+        );
+        assert!(
+            enforce_curio_preservation("a.md", old, "---\ntitle: changed\n---\nbody\n").is_err()
+        );
     }
 
     #[test]
