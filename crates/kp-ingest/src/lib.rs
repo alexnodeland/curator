@@ -11,7 +11,7 @@
 //! | [`curio`] | the Curio adapter: vendored-schema validation, `curio_id` → `curio:<id>`, managed split, manifest ownership oracle |
 //! | [`events`] | rotation-aware `curio.events.v1` tail → behavior rollups |
 //! | [`chunker`] | heading-aware markdown chunker (fences atomic) |
-//! | [`ingest`] | the orchestration: walk → adapt → chunk → batch-embed → upsert → link → tail |
+//! | [`mod@ingest`] | the orchestration: walk → adapt → chunk → batch-embed → upsert → link → tail |
 
 pub mod chunker;
 pub mod curio;
