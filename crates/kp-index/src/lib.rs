@@ -7,9 +7,13 @@
 //! contract) and may change freely.
 
 pub mod chunk;
+pub mod db;
 pub mod embed;
 pub mod error;
+pub mod search;
 
 pub use chunk::{Chunk, ChunkParams, chunk_text};
+pub use db::{Index, IndexMeta, IndexReader, SCHEMA_VERSION};
 pub use embed::{Embedder, HashEmbedder};
 pub use error::IndexError;
+pub use search::SearchHit;
