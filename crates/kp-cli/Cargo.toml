@@ -17,6 +17,7 @@ kp-ingest = { workspace = true }
 kp-zotero = { workspace = true }
 kp-mcp = { workspace = true }
 kp-librarian = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
