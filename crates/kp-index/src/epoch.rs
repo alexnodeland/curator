@@ -98,6 +98,11 @@ pub fn build_epoch_from(
             source,
         })?;
     }
+    // Take the LIVE index's writer lock for the whole build + swap: a
+    // concurrent writer (kp ingest mid-run) must never have its WAL
+    // deleted out from under it by the swap — that would silently discard
+    // its entire run while it reports success.
+    let _live_lock = crate::db::acquire_writer_lock(&live_path)?;
     // A leftover .next is residue of a crashed build: discard, rebuild.
     remove_db_files(&next_path)?;
 
@@ -142,20 +147,48 @@ pub fn build_epoch_from(
     // so the rename moves ONE self-contained file.
     next.close()?;
 
-    // Clear the OLD epoch's sidecars before the swap — a stale index.db-wal
-    // from the previous file must never be replayed into the new one.
-    // (Single-writer batch discipline makes this safe; see db.rs.)
+    // Retire the OLD epoch's sidecars before the swap — a stale
+    // index.db-wal from the previous file must never be replayed into the
+    // new one. Checkpoint FIRST (TRUNCATE folds any committed WAL frames
+    // into the main file and empties the WAL), so a crash between the
+    // sidecar removal and the rename leaves the previous epoch serving
+    // with ALL of its committed transactions — never rolled back to its
+    // last checkpoint. The writer lock held above makes this safe against
+    // concurrent writers; readers re-open per operation.
+    checkpoint_wal(&live_path);
     remove_sidecars(&live_path)?;
     std::fs::rename(&next_path, &live_path).map_err(|source| IndexError::Io {
         path: live_path.clone(),
         source,
     })?;
+    // Tidy the .next writer-lock file (its lock was released when the
+    // build handle closed). Best-effort — a leftover empty file is inert.
+    let _ = std::fs::remove_file(crate::db::writer_lock_path(&next_path));
 
     Ok(EpochReport {
         epoch,
         notes_indexed: indexed,
         notes_skipped: skipped,
     })
+}
+
+/// Fold any committed WAL frames of the db at `path` into its main file
+/// (`PRAGMA wal_checkpoint(TRUNCATE)`). Best-effort: a missing, corrupt,
+/// or non-WAL file is skipped — the caller removes the sidecars anyway.
+fn checkpoint_wal(path: &Path) {
+    if !path.exists() {
+        return;
+    }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return;
+    };
+    if let Err(err) = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())) {
+        tracing::warn!(%err, path = %path.display(),
+            "could not checkpoint the previous epoch's WAL before the swap");
+    }
 }
 
 fn remove_db_files(path: &Path) -> Result<(), IndexError> {

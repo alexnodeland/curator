@@ -15,8 +15,16 @@
 //! CLI commands (`kp ingest`, `kp reindex`) — one process, one command,
 //! holding the writer for the life of the run, with no concurrent request
 //! fan-in to arbitrate. WAL mode keeps concurrent READERS (per-session
-//! stdio MCP servers) unblocked while a batch write is in flight, and a
-//! busy timeout absorbs the rare overlap of two CLI invocations.
+//! stdio MCP servers) unblocked while a batch write is in flight.
+//!
+//! The single-writer rule is ENFORCED, not assumed: every writer handle
+//! (and the epoch swap, see [`crate::epoch`]) holds an advisory OS file
+//! lock on `<index>.lock` for its lifetime. A second writer — another
+//! `kp ingest`/`kp reindex`/`kp zotero sync` in a different process —
+//! fails fast with [`IndexError::WriterLocked`] instead of racing the
+//! first (the worst race: an epoch swap deleting a live writer's WAL,
+//! silently discarding its entire run). Readers take no lock and are
+//! never blocked; a busy timeout still absorbs writer-vs-reader overlap.
 
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -114,12 +122,62 @@ pub struct BehaviorStats {
     pub last_activity: Option<String>,
 }
 
+/// An exclusive advisory lock on `<db>.lock`, held for the lifetime of a
+/// writer handle or an epoch swap. Dropping the guard (closing the file)
+/// releases the lock; the OS also releases it if the process dies, so a
+/// crash can never leave the index permanently locked.
+#[derive(Debug)]
+pub(crate) struct WriterLock {
+    _file: std::fs::File,
+}
+
+/// Acquire the exclusive writer lock for the index at `db_path`, failing
+/// fast with [`IndexError::WriterLocked`] when another process holds it.
+pub(crate) fn acquire_writer_lock(db_path: &Path) -> Result<WriterLock, IndexError> {
+    let lock_path = writer_lock_path(db_path);
+    if let Some(parent) = lock_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|source| IndexError::Io {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| IndexError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(WriterLock { _file: file }),
+        Err(std::fs::TryLockError::WouldBlock) => Err(IndexError::WriterLocked(lock_path)),
+        Err(std::fs::TryLockError::Error(source)) => Err(IndexError::Io {
+            path: lock_path,
+            source,
+        }),
+    }
+}
+
+/// `<db>.lock` — a sibling of the database file. A separate file (not the
+/// db itself) so the lock survives the epoch swap's rename-over.
+pub(crate) fn writer_lock_path(db_path: &Path) -> PathBuf {
+    let mut p = db_path.to_owned().into_os_string();
+    p.push(".lock");
+    PathBuf::from(p)
+}
+
 /// The single writer handle (see module docs for the discipline).
 #[derive(Debug)]
 pub struct Index {
     pub(crate) conn: Connection,
     path: PathBuf,
     meta: IndexMeta,
+    /// Held for the handle's lifetime; released on close/drop.
+    _lock: WriterLock,
 }
 
 /// A read-only connection for retrieval. Cheap to open; open one per
@@ -140,6 +198,7 @@ impl Index {
     ) -> Result<Self, IndexError> {
         register_sqlite_vec();
         let path = path.as_ref().to_owned();
+        let lock = acquire_writer_lock(&path)?;
         if path.exists() {
             return Err(IndexError::Io {
                 path,
@@ -158,7 +217,12 @@ impl Index {
             params![SCHEMA_VERSION, embedder.id(), embedder.dims() as i64, epoch],
         )?;
         let meta = read_meta(&conn, &path)?;
-        Ok(Self { conn, path, meta })
+        Ok(Self {
+            conn,
+            path,
+            meta,
+            _lock: lock,
+        })
     }
 
     /// Open an existing index for writing. The supplied embedder MUST be
@@ -167,6 +231,7 @@ impl Index {
     pub fn open(path: impl AsRef<Path>, embedder: &dyn Embedder) -> Result<Self, IndexError> {
         register_sqlite_vec();
         let path = path.as_ref().to_owned();
+        let lock = acquire_writer_lock(&path)?;
         if !path.exists() {
             return Err(IndexError::Missing(path));
         }
@@ -177,7 +242,12 @@ impl Index {
         configure(&conn)?;
         let meta = read_meta(&conn, &path)?;
         check_meta(&meta, embedder)?;
-        Ok(Self { conn, path, meta })
+        Ok(Self {
+            conn,
+            path,
+            meta,
+            _lock: lock,
+        })
     }
 
     /// The meta row this handle validated at open/create.

@@ -20,6 +20,14 @@ pub enum IndexError {
     /// No index exists at the configured path yet.
     #[error("no index at {0} — run an epoch build first")]
     Missing(PathBuf),
+    /// Another process holds the writer lock (a concurrent `kp ingest` /
+    /// `kp reindex` / `kp zotero sync`). Writers are strictly single-file
+    /// single-process; readers are never blocked.
+    #[error(
+        "another kp process is writing this index (lock held on {0}) — \
+         wait for it to finish and retry"
+    )]
+    WriterLocked(PathBuf),
     /// The index was built by a different embedder. Mixed-model indexes
     /// are forbidden: every vector in an epoch comes from ONE model.
     #[error(

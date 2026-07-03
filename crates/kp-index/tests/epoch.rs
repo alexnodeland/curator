@@ -190,3 +190,35 @@ fn index_next_path(cfg: &KpConfig) -> std::path::PathBuf {
     p.push(".next");
     p.into()
 }
+
+/// Regression: the single-writer rule is enforced across processes and
+/// handles — a live writer refuses BOTH a second writer and an epoch
+/// swap (whose sidecar cleanup would otherwise silently discard the
+/// writer's committed-but-uncheckpointed run).
+#[test]
+fn concurrent_writers_and_swaps_are_refused_while_a_writer_is_live() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = config_for(dir.path());
+    let e = HashEmbedder::new(64);
+    write_note(&cfg, "a.md", "serving content\n");
+    build_epoch(&cfg, &e).expect("first build");
+
+    let writer = Index::open(cfg.index_path(), &e).expect("writer");
+    let err = Index::open(cfg.index_path(), &e).unwrap_err();
+    assert!(
+        matches!(err, IndexError::WriterLocked(_)),
+        "second writer must be refused: {err}"
+    );
+    let err = build_epoch(&cfg, &e).unwrap_err();
+    assert!(
+        matches!(err, IndexError::WriterLocked(_)),
+        "epoch swap must be refused while a writer is live: {err}"
+    );
+    // Readers are never blocked by the writer lock.
+    IndexReader::open(cfg.index_path()).expect("reader unblocked");
+
+    // Releasing the writer frees the lock for the next build.
+    writer.close().expect("close");
+    let report = build_epoch(&cfg, &e).expect("rebuild after release");
+    assert_eq!(report.epoch, 2);
+}

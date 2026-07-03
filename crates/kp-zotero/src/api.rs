@@ -93,14 +93,15 @@ impl ZoteroApi {
                 req = req.header("If-Modified-Since-Version", v.to_string());
             }
             let resp = req.send()?;
-            if first && resp.status() == StatusCode::NOT_MODIFIED {
-                if let Some(v) = since {
-                    return Ok(ItemsDelta {
-                        items,
-                        version: v,
-                        not_modified: true,
-                    });
-                }
+            if first
+                && resp.status() == StatusCode::NOT_MODIFIED
+                && let Some(v) = since
+            {
+                return Ok(ItemsDelta {
+                    items,
+                    version: v,
+                    not_modified: true,
+                });
             }
             let resp = ok_or_status(resp, &url)?;
             if version.is_none() {

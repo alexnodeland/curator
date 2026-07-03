@@ -145,15 +145,15 @@ impl<'a> WebDavShim<'a> {
                 status: resp.status().as_u16(),
             });
         }
-        if let Some(len) = resp.content_length() {
-            if len > self.caps.max_zip_bytes {
-                return Err(ZoteroError::TooLarge {
-                    what: "zip",
-                    key: key.to_owned(),
-                    size: len,
-                    cap: self.caps.max_zip_bytes,
-                });
-            }
+        if let Some(len) = resp.content_length()
+            && len > self.caps.max_zip_bytes
+        {
+            return Err(ZoteroError::TooLarge {
+                what: "zip",
+                key: key.to_owned(),
+                size: len,
+                cap: self.caps.max_zip_bytes,
+            });
         }
         // Capped read even without a Content-Length header.
         let mut bytes = Vec::new();
@@ -224,17 +224,18 @@ pub fn extract_fulltext(
         });
     }
     // ...and against the .prop when its hash is CRC32-shaped.
-    if let Some(hash) = prop.hash.as_deref() {
-        if hash.len() == 8 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
-            let expected = u32::from_str_radix(hash, 16)
-                .map_err(|e| ZoteroError::Prop(format!("bad CRC32 hash {hash:?}: {e}")))?;
-            if got != expected {
-                return Err(ZoteroError::CrcMismatch {
-                    key: key.to_owned(),
-                    expected,
-                    got,
-                });
-            }
+    if let Some(hash) = prop.hash.as_deref()
+        && hash.len() == 8
+        && hash.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        let expected = u32::from_str_radix(hash, 16)
+            .map_err(|e| ZoteroError::Prop(format!("bad CRC32 hash {hash:?}: {e}")))?;
+        if got != expected {
+            return Err(ZoteroError::CrcMismatch {
+                key: key.to_owned(),
+                expected,
+                got,
+            });
         }
     }
 
