@@ -41,4 +41,26 @@ mod tests {
         assert_eq!(set.len(), TOOLS_V1.len());
         assert!(TOOLS_V1.iter().all(|t| t.starts_with("kp_")));
     }
+
+    /// The tool table in `contracts/mcp/v1.md` IS the contract. `TOOLS_V1`
+    /// mirrors it, and the router test pins the router to `TOOLS_V1` — this
+    /// test closes the loop so the published doc can never silently drift
+    /// from the served surface.
+    #[test]
+    fn the_published_tool_table_matches_tools_v1() {
+        let doc = include_str!("../../../contracts/mcp/v1.md");
+        let documented: Vec<&str> = doc
+            .lines()
+            .filter_map(|line| {
+                // Tool-table rows only: `| \`kp_...\` | args | returns |`.
+                let name = line.trim().strip_prefix("| `")?.split('`').next()?;
+                name.starts_with("kp_").then_some(name)
+            })
+            .collect();
+        assert_eq!(
+            documented,
+            TOOLS_V1.to_vec(),
+            "contracts/mcp/v1.md tool table drifted from TOOLS_V1 (order is part of the doc)"
+        );
+    }
 }
