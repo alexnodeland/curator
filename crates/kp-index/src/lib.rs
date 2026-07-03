@@ -6,6 +6,10 @@
 //! never migrations. Everything in this crate is INTERNAL (not a published
 //! contract) and may change freely.
 
+pub mod chunk;
 pub mod embed;
+pub mod error;
 
+pub use chunk::{Chunk, ChunkParams, chunk_text};
 pub use embed::{Embedder, HashEmbedder};
+pub use error::IndexError;

@@ -40,7 +40,10 @@ sha2 = "0.11"
 thiserror = "2"
 toml = "0.9"
 tracing = "0.1"
-rusqlite = { version = "0.40", features = ["bundled"] }
+# 0.40 pulls libsqlite3-sys 0.38, whose build script needs the (still
+# unstable on this toolchain) cfg_select! feature; 0.37 is the newest line
+# that builds on stable 1.94.
+rusqlite = { version = "0.37", features = ["bundled"] }
 sqlite-vec = "0.1.9"
 
 # Dev-only.
