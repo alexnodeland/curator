@@ -290,10 +290,17 @@ impl IndexReader {
     /// query point for [`Self::related`] and the librarian's
     /// anchor-similarity scoring.
     pub fn note_centroid(&self, kp_id: &str) -> Result<Option<Vec<f32>>, IndexError> {
+        // ORDER BY c.ord: float addition is not associative, so the
+        // summation order must be a property of the DATA, not of SQLite's
+        // query plan — the digest's byte-identical-for-identical-inputs
+        // guarantee threads through this sum (scores, cluster ordering,
+        // and the content-seeded digest id all derive from it). Summing
+        // in f64 removes most of the sensitivity outright.
         let mut stmt = self.conn.prepare(
             "SELECT v.embedding FROM vec_chunks v
              JOIN chunks c ON c.id = v.rowid
-             WHERE c.note = ?1",
+             WHERE c.note = ?1
+             ORDER BY c.ord",
         )?;
         let blobs = stmt
             .query_map(params![kp_id], |r| r.get::<_, Vec<u8>>(0))?
@@ -302,16 +309,14 @@ impl IndexReader {
             return Ok(None);
         }
         let dims = self.meta.dims;
-        let mut centroid = vec![0.0f32; dims];
+        let mut sums = vec![0.0f64; dims];
         for blob in &blobs {
             for (i, chunk) in blob.chunks_exact(4).take(dims).enumerate() {
-                centroid[i] += f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                sums[i] += f64::from(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
             }
         }
-        let n = blobs.len() as f32;
-        for x in &mut centroid {
-            *x /= n;
-        }
+        let n = blobs.len() as f64;
+        let centroid: Vec<f32> = sums.iter().map(|x| (x / n) as f32).collect();
         if centroid.iter().all(|x| *x == 0.0) {
             return Ok(None);
         }
