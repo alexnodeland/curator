@@ -503,6 +503,17 @@ impl Index {
         Ok(())
     }
 
+    /// A note's outgoing edges as `(to_id, kind)`, ordered.
+    pub fn links_from(&self, from_id: &str) -> Result<Vec<(String, String)>, IndexError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT to_id, kind FROM links WHERE from_id = ?1 ORDER BY to_id, kind")?;
+        let rows = stmt
+            .query_map(params![from_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// `PRAGMA integrity_check` — used by the epoch machinery before a
     /// blue/green swap.
     pub fn integrity_check(&self) -> Result<(), IndexError> {

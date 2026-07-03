@@ -10,12 +10,50 @@
 
 use std::path::Path;
 
+use kp_core::note::Note;
 use kp_core::{KpConfig, Vault};
 
-use crate::chunk::ChunkParams;
+use crate::chunk::{Chunk, ChunkParams, chunk_text};
 use crate::db::Index;
 use crate::embed::Embedder;
 use crate::error::IndexError;
+
+/// A pluggable chunking function: callers with richer chunkers (e.g. the
+/// heading-aware markdown chunker in kp-ingest, which this crate must not
+/// depend on) inject theirs so an epoch rebuild produces exactly the same
+/// chunks as incremental ingest.
+pub type ChunkFn<'a> = &'a dyn Fn(&str, ChunkParams) -> Vec<Chunk>;
+
+/// The note corpus an epoch build indexes. Richer pipelines (kp-ingest:
+/// `.kpignore`, the Curio adapter's identity mapping) hand in their
+/// prepared view so a rebuild reproduces EXACTLY what incremental ingest
+/// would index — same notes, same identities.
+#[derive(Debug, Default)]
+pub struct EpochSource {
+    /// Parsed (and possibly adapted) notes, path-sorted.
+    pub notes: Vec<Note>,
+    /// Files the source already warned about and dropped (parse failures,
+    /// producer-schema violations) — reported, not fatal.
+    pub skipped: usize,
+}
+
+impl EpochSource {
+    /// The default source: every parseable note in the vault, as-is.
+    /// Parse failures are warned + counted, never fatal.
+    pub fn from_vault(vault: &Vault) -> Result<Self, IndexError> {
+        let mut source = Self::default();
+        for rel in vault.note_paths()? {
+            match vault.read_note(&rel) {
+                Ok(note) => source.notes.push(note),
+                Err(err) => {
+                    tracing::warn!(note = %rel, %err, "skipping unparseable note in epoch build");
+                    source.skipped += 1;
+                }
+            }
+        }
+        Ok(source)
+    }
+}
 
 /// What a finished epoch build did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,17 +62,30 @@ pub struct EpochReport {
     pub epoch: i64,
     /// Notes indexed from the vault.
     pub notes_indexed: usize,
-    /// Notes skipped because they failed to parse (warned, not fatal — a
-    /// single malformed producer file must not brick reindexing).
+    /// Notes skipped (parse failures, duplicate identities) — warned, not
+    /// fatal: a single malformed producer file must not brick reindexing.
     pub notes_skipped: usize,
 }
 
 /// Build a complete new index epoch from the configured vault, verify it,
 /// and atomically swap it in. Returns only after `index.db` IS the new
 /// epoch (or an error, in which case the previous `index.db` — if any —
-/// is untouched).
+/// is untouched). Chunks with this crate's generic token-window chunker
+/// over the raw vault corpus; use [`build_epoch_from`] to inject a richer
+/// chunker and note source.
 pub fn build_epoch(config: &KpConfig, embedder: &dyn Embedder) -> Result<EpochReport, IndexError> {
     let vault = Vault::open(config.vault_path())?;
+    let source = EpochSource::from_vault(&vault)?;
+    build_epoch_from(config, embedder, &chunk_text, source)
+}
+
+/// [`build_epoch`] with an injected chunking function and note corpus.
+pub fn build_epoch_from(
+    config: &KpConfig,
+    embedder: &dyn Embedder,
+    chunker: ChunkFn<'_>,
+    source: EpochSource,
+) -> Result<EpochReport, IndexError> {
     let live_path = config.index_path();
     let next_path = {
         let mut p = live_path.clone().into_os_string();
@@ -59,29 +110,23 @@ pub fn build_epoch(config: &KpConfig, embedder: &dyn Embedder) -> Result<EpochRe
     let mut next = Index::create(&next_path, embedder, epoch)?;
     let params = ChunkParams::from_config(&config.index);
     let mut indexed = 0usize;
-    let mut skipped = 0usize;
+    let mut skipped = source.skipped;
     let mut seen = std::collections::HashSet::new();
-    let rels = vault.note_paths()?;
-    for rel in &rels {
-        match vault.read_note(rel) {
-            Ok(note) => {
-                // Two files claiming one identity is a producer bug; the
-                // first (path-sorted) file wins deterministically, the
-                // rest are surfaced, not silently merged.
-                if !seen.insert(note.kp_id().to_string()) {
-                    tracing::warn!(note = %rel, kp_id = %note.kp_id(),
-                        "skipping note with duplicate kp_id in epoch build");
-                    skipped += 1;
-                    continue;
-                }
-                next.upsert_note(&note, embedder, params)?;
-                indexed += 1;
-            }
-            Err(err) => {
-                tracing::warn!(note = %rel, %err, "skipping unparseable note in epoch build");
-                skipped += 1;
-            }
+    for note in &source.notes {
+        // Two files claiming one identity is a producer bug; the first
+        // (path-sorted) file wins deterministically, the rest are
+        // surfaced, not silently merged.
+        if !seen.insert(note.kp_id().to_string()) {
+            tracing::warn!(note = %note.rel_path, kp_id = %note.kp_id(),
+                "skipping note with duplicate kp_id in epoch build");
+            skipped += 1;
+            continue;
         }
+        let chunks = chunker(&note.body, params);
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+        let vectors = embedder.embed(&texts)?;
+        next.upsert_note_prechunked(note, embedder, &chunks, &vectors)?;
+        indexed += 1;
     }
 
     // Verify BEFORE the swap: structural integrity + completeness. A next

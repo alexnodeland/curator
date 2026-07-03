@@ -22,6 +22,6 @@ pub use db::{
 pub use embed::{Embedder, HashEmbedder};
 #[cfg(feature = "embed-onnx")]
 pub use embed_onnx::FastEmbedder;
-pub use epoch::{EpochReport, build_epoch};
+pub use epoch::{ChunkFn, EpochReport, EpochSource, build_epoch, build_epoch_from};
 pub use error::IndexError;
 pub use search::SearchHit;
