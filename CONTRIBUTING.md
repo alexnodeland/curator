@@ -14,8 +14,11 @@ this document exists so the workflow is public from day one.
   the deterministic `hash` embedder; producer tests use checked-in
   fixtures.
 - **Gates are the review.** `just ci` (fmt, clippy with warnings denied,
-  tests, the grep litmus) must be green before any commit is proposed.
-  Pre-commit hooks enforce the same locally: `just setup` once.
+  tests, rustdoc with warnings denied, the grep litmus, and the coverage
+  gate — region coverage >= 80% on kp-core/kp-index/kp-librarian) must be
+  green before any commit is proposed. Pre-commit hooks enforce the fast
+  half locally: `just setup` once (it also installs `cargo-llvm-cov`).
+  A failing coverage gate means missing tests — never exclusions.
 - **Conventional Commits** — `type(scope)?: summary`, types:
   feat fix docs refactor chore ci test perf build revert.
 - **Public-safety litmus.** This repo describes a product, never a

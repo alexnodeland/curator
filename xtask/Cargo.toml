@@ -1,12 +1,14 @@
 [package]
 name = "xtask"
-description = "Workspace automation (cargo xtask pattern): the grep litmus and future repo tooling"
+description = "Workspace automation (cargo xtask pattern): the grep litmus and the coverage gate"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The coverage gate parses cargo-llvm-cov JSON exports.
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

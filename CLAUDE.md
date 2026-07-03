@@ -41,8 +41,12 @@ Dependency direction is strictly downward:
   any hit. Where deployment choices exist, they are seams (traits,
   config), never named instances.
 - **Justfile front door.** `just` lists everything: `setup`, `build`,
-  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `cov`, `ci`.
-  Run `just ci` before pushing — it is exactly what CI runs.
+  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `doc`, `cov`,
+  `ci`. Run `just ci` before pushing — it is exactly what CI runs.
+- **Coverage gate.** `just cov` (in `ci`) enforces region coverage >= 80%
+  on kp-core, kp-index, kp-librarian (report-only elsewhere) via
+  `xtask coverage-gate`. Under the floor = write the missing tests;
+  exclusion games are forbidden. kp-core carries `missing_docs`.
 - **Conventional Commits** on `main` (commit-msg hook enforces).
   Workspace lints: `unsafe_code = "forbid"` (relax only if sqlite-vec FFI
   registration truly requires it, with a comment at the site).

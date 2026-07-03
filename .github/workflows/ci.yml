@@ -18,7 +18,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
 
       - uses: Swatinem/rust-cache@v2
 
@@ -31,5 +33,17 @@ jobs:
       - name: test (hermetic — no network, no models, no services)
         run: cargo test --workspace
 
+      - name: doc (rustdoc warning-clean; missing_docs gated on kp-core)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
       - name: grep litmus (public-safety boundary)
         run: cargo run -p xtask -- litmus
+
+      # Same instrumented run + gate as `just cov`: region coverage,
+      # fail-under 80% on kp-core/kp-index/kp-librarian, report elsewhere.
+      - name: coverage (region gate)
+        run: |
+          cargo llvm-cov --workspace --no-report
+          cargo llvm-cov report --summary-only
+          cargo llvm-cov report --json --summary-only --output-path target/coverage.json
+          cargo run -p xtask -- coverage-gate target/coverage.json
