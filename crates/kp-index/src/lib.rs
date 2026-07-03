@@ -25,5 +25,5 @@ pub use embed::{Embedder, HashEmbedder, embedder_from_config};
 pub use embed_onnx::FastEmbedder;
 pub use epoch::{ChunkFn, EpochReport, EpochSource, build_epoch, build_epoch_from};
 pub use error::IndexError;
-pub use query::{NoteRecord, NoteSummary};
+pub use query::{DigestLogEntry, NoteRecord, NoteSummary};
 pub use search::SearchHit;

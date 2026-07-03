@@ -445,24 +445,23 @@ impl Index {
 
     /// A note's behavioral rollup, if any events have folded into it.
     pub fn behavior(&self, kp_id: &str) -> Result<Option<BehaviorStats>, IndexError> {
-        let row = self.conn.query_row(
-            "SELECT opened_count, starred, read_later, last_activity
-             FROM behavior WHERE kp_id = ?1",
-            params![kp_id],
-            |r| {
-                Ok(BehaviorStats {
-                    opened_count: r.get(0)?,
-                    starred: r.get::<_, i64>(1)? != 0,
-                    read_later: r.get::<_, i64>(2)? != 0,
-                    last_activity: r.get(3)?,
-                })
-            },
-        );
-        match row {
-            Ok(stats) => Ok(Some(stats)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        behavior_row(&self.conn, kp_id)
+    }
+
+    /// Record a librarian digest (idempotent by date — the `digest_log`
+    /// UNIQUE constraint). Returns `true` when the row is new, `false`
+    /// when this date was already logged.
+    pub fn record_digest(
+        &mut self,
+        digest_date: &str,
+        kp_id: &str,
+        created: &str,
+    ) -> Result<bool, IndexError> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO digest_log (digest_date, kp_id, created) VALUES (?1, ?2, ?3)",
+            params![digest_date, kp_id, created],
+        )?;
+        Ok(n > 0)
     }
 
     /// The indexed `(path, checksum)` of a note, if present — the change
@@ -561,6 +560,34 @@ impl IndexReader {
     /// Guard used by vector legs: the query embedder must match the index.
     pub(crate) fn check_embedder(&self, embedder: &dyn Embedder) -> Result<(), IndexError> {
         check_meta(&self.meta, embedder)
+    }
+
+    /// A note's behavioral rollup — the reader twin of [`Index::behavior`]
+    /// (the librarian's scoring reads these without a writer handle).
+    pub fn behavior(&self, kp_id: &str) -> Result<Option<BehaviorStats>, IndexError> {
+        behavior_row(&self.conn, kp_id)
+    }
+}
+
+/// Shared behavior-rollup lookup (writer and reader connections).
+fn behavior_row(conn: &Connection, kp_id: &str) -> Result<Option<BehaviorStats>, IndexError> {
+    let row = conn.query_row(
+        "SELECT opened_count, starred, read_later, last_activity
+         FROM behavior WHERE kp_id = ?1",
+        params![kp_id],
+        |r| {
+            Ok(BehaviorStats {
+                opened_count: r.get(0)?,
+                starred: r.get::<_, i64>(1)? != 0,
+                read_later: r.get::<_, i64>(2)? != 0,
+                last_activity: r.get(3)?,
+            })
+        },
+    );
+    match row {
+        Ok(stats) => Ok(Some(stats)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
     }
 }
 

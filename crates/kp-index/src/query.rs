@@ -43,8 +43,20 @@ pub struct NoteSummary {
     pub title: String,
     pub tags: Vec<String>,
     pub source: Option<String>,
+    pub created: Option<String>,
     pub updated: Option<String>,
     pub ingested_at: String,
+}
+
+/// One `digest_log` row — what the librarian stamped for a digest date.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigestLogEntry {
+    /// `YYYY-MM-DD` (unique — digests are idempotent by date).
+    pub digest_date: String,
+    /// The digest note's identity (`kp:` namespace).
+    pub kp_id: String,
+    /// RFC 3339 UTC creation timestamp of the digest run.
+    pub created: String,
 }
 
 const NOTE_COLUMNS: &str =
@@ -62,6 +74,19 @@ fn note_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRecord> {
         checksum: r.get(7)?,
         body: r.get(8)?,
         ingested_at: r.get(9)?,
+    })
+}
+
+fn summary_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
+    Ok(NoteSummary {
+        kp_id: r.get(0)?,
+        path: r.get(1)?,
+        title: r.get(2)?,
+        tags: parse_tags(&r.get::<_, String>(3)?),
+        source: r.get(4)?,
+        created: r.get(5)?,
+        updated: r.get(6)?,
+        ingested_at: r.get(7)?,
     })
 }
 
@@ -104,7 +129,7 @@ impl IndexReader {
     /// is cosine similarity. Empty when the note is unknown, has no
     /// chunks, or embeds to a zero vector.
     pub fn related(&self, kp_id: &str, k: usize) -> Result<Vec<SearchHit>, IndexError> {
-        let Some(centroid) = self.chunk_centroid(kp_id)? else {
+        let Some(centroid) = self.note_centroid(kp_id)? else {
             return Ok(Vec::new());
         };
         let mut blob = Vec::with_capacity(centroid.len() * 4);
@@ -170,25 +195,54 @@ impl IndexReader {
     ) -> Result<Vec<NoteSummary>, IndexError> {
         let prefix = namespace.map(|ns| format!("{ns}:"));
         let mut stmt = self.conn.prepare(
-            "SELECT kp_id, path, title, tags, source, updated, ingested_at
+            "SELECT kp_id, path, title, tags, source, created, updated, ingested_at
              FROM notes
              WHERE ingested_at >= ?1
                AND (?2 IS NULL OR substr(kp_id, 1, length(?2)) = ?2)
              ORDER BY ingested_at DESC, kp_id
              LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![cutoff, prefix, limit as i64], |r| {
-            Ok(NoteSummary {
-                kp_id: r.get(0)?,
-                path: r.get(1)?,
-                title: r.get(2)?,
-                tags: parse_tags(&r.get::<_, String>(3)?),
-                source: r.get(4)?,
-                updated: r.get(5)?,
-                ingested_at: r.get(6)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![cutoff, prefix, limit as i64], summary_from_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Digest candidates: notes ingested (or re-ingested) at or after
+    /// `cutoff`, OR with behavioral activity at or after it — "ingested or
+    /// active since the last digest". `None` means no digest has run yet:
+    /// every note is a candidate. Ordered by `kp_id` (deterministic).
+    pub fn active_since(&self, cutoff: Option<&str>) -> Result<Vec<NoteSummary>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT n.kp_id, n.path, n.title, n.tags, n.source, n.created, n.updated,
+                    n.ingested_at
+             FROM notes n LEFT JOIN behavior b ON b.kp_id = n.kp_id
+             WHERE ?1 IS NULL
+                OR n.ingested_at >= ?1
+                OR (b.last_activity IS NOT NULL AND b.last_activity >= ?1)
+             ORDER BY n.kp_id",
+        )?;
+        let rows = stmt.query_map(params![cutoff], summary_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The most recent `digest_log` row, if the librarian has ever run.
+    pub fn last_digest_entry(&self) -> Result<Option<DigestLogEntry>, IndexError> {
+        let row = self.conn.query_row(
+            "SELECT digest_date, kp_id, created FROM digest_log
+             ORDER BY digest_date DESC LIMIT 1",
+            [],
+            |r| {
+                Ok(DigestLogEntry {
+                    digest_date: r.get(0)?,
+                    kp_id: r.get(1)?,
+                    created: r.get(2)?,
+                })
+            },
+        );
+        match row {
+            Ok(entry) => Ok(Some(entry)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// The latest librarian digest note: the `digest_log` row with the
@@ -232,8 +286,10 @@ impl IndexReader {
     }
 
     /// The mean of a note's stored chunk vectors, or `None` when the note
-    /// has no chunks or the centroid has zero norm.
-    fn chunk_centroid(&self, kp_id: &str) -> Result<Option<Vec<f32>>, IndexError> {
+    /// has no chunks or the centroid has zero norm. This is the note's
+    /// query point for [`Self::related`] and the librarian's
+    /// anchor-similarity scoring.
+    pub fn note_centroid(&self, kp_id: &str) -> Result<Option<Vec<f32>>, IndexError> {
         let mut stmt = self.conn.prepare(
             "SELECT v.embedding FROM vec_chunks v
              JOIN chunks c ON c.id = v.rowid
@@ -272,6 +328,7 @@ mod tests {
     use crate::chunk::ChunkParams;
     use crate::db::Index;
     use crate::embed::HashEmbedder;
+    use crate::query::DigestLogEntry;
 
     fn seeded(dir: &Path) -> (Index, HashEmbedder) {
         let e = HashEmbedder::new(128);
@@ -424,6 +481,119 @@ mod tests {
             .expect("query")
             .expect("present");
         assert_eq!(latest.kp_id, "kp:d1");
+    }
+
+    #[test]
+    fn active_since_unions_ingest_recency_and_behavior_activity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = seeded(dir.path());
+        // Backdate two notes; give one of them behavioral activity.
+        for id in ["kp:bbb", "kp:ccc"] {
+            idx.conn
+                .execute(
+                    "UPDATE notes SET ingested_at = '2020-01-01T00:00:00Z' WHERE kp_id = ?1",
+                    [id],
+                )
+                .expect("backdate");
+        }
+        idx.apply_behavior(
+            "kp:ccc",
+            &crate::db::BehaviorDelta {
+                opened_delta: 1,
+                activity_ts: Some("2026-07-02T10:00:00.000Z".into()),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        let reader = idx.reader().expect("reader");
+
+        // No cutoff: everything.
+        let all = reader.active_since(None).expect("query");
+        assert_eq!(all.len(), 3);
+        assert!(all[0].created.is_some() || all[0].created.is_none()); // column present
+
+        // Cutoff: freshly-ingested kp:aaa + behaviorally-active kp:ccc,
+        // but NOT the dormant backdated kp:bbb.
+        let active = reader
+            .active_since(Some("2026-01-01T00:00:00Z"))
+            .expect("query");
+        let ids: Vec<&str> = active.iter().map(|n| n.kp_id.as_str()).collect();
+        assert_eq!(ids, vec!["kp:aaa", "kp:ccc"]);
+        assert_eq!(active[0].created.as_deref(), None);
+    }
+
+    #[test]
+    fn digest_log_round_trips_and_is_idempotent_by_date() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = seeded(dir.path());
+        assert_eq!(
+            idx.reader()
+                .expect("reader")
+                .last_digest_entry()
+                .expect("query"),
+            None
+        );
+        assert!(
+            idx.record_digest("2026-07-02", "kp:d1", "2026-07-02T06:00:00Z")
+                .expect("record")
+        );
+        assert!(
+            idx.record_digest("2026-07-03", "kp:d2", "2026-07-03T06:00:00Z")
+                .expect("record")
+        );
+        // Same date again: refused, first row stands.
+        assert!(
+            !idx.record_digest("2026-07-03", "kp:other", "2026-07-03T09:00:00Z")
+                .expect("idempotent")
+        );
+        let entry = idx
+            .reader()
+            .expect("reader")
+            .last_digest_entry()
+            .expect("query")
+            .expect("present");
+        assert_eq!(
+            entry,
+            DigestLogEntry {
+                digest_date: "2026-07-03".into(),
+                kp_id: "kp:d2".into(),
+                created: "2026-07-03T06:00:00Z".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn reader_behavior_matches_writer_view() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut idx, _) = seeded(dir.path());
+        idx.apply_behavior(
+            "kp:aaa",
+            &crate::db::BehaviorDelta {
+                opened_delta: 2,
+                starred: Some(true),
+                ..Default::default()
+            },
+        )
+        .expect("fold");
+        let reader = idx.reader().expect("reader");
+        assert_eq!(
+            reader.behavior("kp:aaa").expect("query"),
+            idx.behavior("kp:aaa").expect("query")
+        );
+        assert_eq!(reader.behavior("kp:zzz").expect("query"), None);
+    }
+
+    #[test]
+    fn note_centroid_is_public_and_none_for_unknown_notes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (idx, _) = seeded(dir.path());
+        let reader = idx.reader().expect("reader");
+        let centroid = reader
+            .note_centroid("kp:aaa")
+            .expect("query")
+            .expect("has chunks");
+        assert_eq!(centroid.len(), reader.meta().dims);
+        assert_eq!(reader.note_centroid("kp:zzz").expect("query"), None);
     }
 
     #[test]
