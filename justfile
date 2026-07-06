@@ -66,5 +66,37 @@ cov:
     cargo llvm-cov report --json --summary-only --output-path target/coverage.json
     cargo run -p xtask -- coverage-gate target/coverage.json
 
+# The full walk-through, offline: scratch-copy examples/sample-vault,
+# init with the deterministic hash embedder (no ML, no downloads),
+# ingest, search, digest. Non-interactive; target/demo is disposable.
+demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch=target/demo
+    rm -rf "$scratch"
+    mkdir -p "$scratch"
+    cp -R examples/sample-vault "$scratch/vault"
+    run() { cargo run --quiet -p curator-cli --no-default-features -- "$@"; }
+    cfg="$scratch/vault/curator.toml"
+    echo "== curator init (hash embedder: offline, deterministic) =="
+    run init "$scratch/vault" --embedder hash
+    echo
+    echo "== curator search \"hybrid retrieval\" =="
+    run search "hybrid retrieval" --config "$cfg" --k 3
+    echo
+    echo "== curator search \"dialing in espresso\" --mode fts =="
+    run search "dialing in espresso" --config "$cfg" --mode fts --k 3
+    echo
+    echo "== curator digest run (the librarian, zero LLM) =="
+    run digest run --config "$cfg"
+    echo
+    echo "== curator proposals list (digests are proposals — humans apply) =="
+    run proposals list --config "$cfg"
+    echo
+    echo "== curator doctor =="
+    run doctor --config "$cfg"
+    echo
+    echo "demo vault: $scratch/vault (config inside; rerun with 'just demo')"
+
 # Everything CI runs, in CI's order
 ci: fmt-check clippy test doc litmus lean-check site cov
