@@ -1,10 +1,10 @@
-# Knowledge Plane
+# Curator
 
-> **Status: pre-release.** Working name, contracts v1, APIs settling.
+> **Status: pre-release.** Contracts v1, APIs settling.
 > Not yet packaged or published. **License: TBD — private until launch.**
 
-The Knowledge Plane is the substrate under your personal knowledge
-system: **any plain-markdown vault** + **one index database** + **MCP for
+Curator is the knowledge plane under your personal knowledge system:
+**any plain-markdown vault** + **one index database** + **MCP for
 agents** + **a deterministic librarian**.
 
 - **Your notes stay plain files.** A markdown+YAML directory under git is
@@ -27,7 +27,7 @@ No model server, no database service, no daemon — one binary, one
 SQLite file:
 
 ```sh
-git clone <this-repo> && cd knowledge-plane
+git clone <this-repo> && cd curator
 cargo build --workspace
 cargo run -p curator-cli -- --help     # the `curator` binary
 ```
@@ -38,13 +38,13 @@ in-process ONNX embedder: `cargo build` fetches ONNX Runtime binaries
 that embeds (e.g. default-config `curator init` / `curator ingest`) fetches the
 pinned ~130 MB embedding model from Hugging Face into `.kp/models/`
 (one-time, announced with a progress bar). For a fully-offline or lean
-setup: set `embedder = "hash"` in `kp.toml` (deterministic, no ML), or
+setup: set `embedder = "hash"` in `curator.toml` (deterministic, no ML), or
 build with `cargo build -p curator-cli --no-default-features` — that binary
 has no ONNX stack and performs zero downloads at build or run time.
 
-Copy [`curator.example.toml`](curator.example.toml) to `kp.toml` and point
-`[vault].path` at your markdown directory — or let `curator init` scaffold
-one. `curator --help` lists the surface: ingest, index rebuild, Zotero sync,
+Copy [`curator.example.toml`](curator.example.toml) to `curator.toml`
+(the legacy `kp.toml` name is still accepted) and point `[vault].path` at
+your markdown directory — or let `curator init` scaffold one. `curator --help` lists the surface: ingest, index rebuild, Zotero sync,
 search/get/related/recent, `mcp serve`, proposals, the librarian digest,
 doctor. (Pre-release: APIs are still settling — `docs/design/` is the
 design record.)
@@ -60,7 +60,7 @@ contracts; everything else is internal and changes freely.
 | contract | governs | spec |
 |---|---|---|
 | `kp-note/v1` | note identity + enrichment frontmatter | [contracts/kp-note/v1.md](contracts/kp-note/v1.md) |
-| `kp-config/v1` | `kp.toml` configuration | [contracts/kp-config/v1.md](contracts/kp-config/v1.md) |
+| `kp-config/v1` | `curator.toml` configuration (legacy name `kp.toml`) | [contracts/kp-config/v1.md](contracts/kp-config/v1.md) |
 | `proposals/v1` | the only agent write path | [contracts/proposals/v1.md](contracts/proposals/v1.md) |
 | MCP surface v1 | the agent tool surface | [contracts/mcp/v1.md](contracts/mcp/v1.md) |
 

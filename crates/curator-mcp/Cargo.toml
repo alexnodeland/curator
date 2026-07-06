@@ -1,6 +1,6 @@
 [package]
 name = "curator-mcp"
-description = "Knowledge Plane MCP server: the one agent entrypoint — MCP surface v1 (stdio default, streamable HTTP + bearer optional)"
+description = "Curator MCP server: the one agent entrypoint — MCP surface v1 (stdio default, streamable HTTP + bearer optional)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

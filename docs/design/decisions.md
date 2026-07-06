@@ -1,4 +1,4 @@
-# Knowledge Plane — design decisions
+# Curator — design decisions
 
 Distilled from the adversarial design review: three parallel designs (distribution,
 integration fabric, MCP/agent architecture) were each subjected to independent verdict

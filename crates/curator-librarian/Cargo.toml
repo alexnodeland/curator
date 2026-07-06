@@ -1,6 +1,6 @@
 [package]
 name = "curator-librarian"
-description = "Knowledge Plane librarian: deterministic-first maintenance + digest loops; optional LLM harness adapter as a prose enhancer"
+description = "Curator librarian: deterministic-first maintenance + digest loops; optional LLM harness adapter as a prose enhancer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,6 @@
-# Knowledge Plane
+# Curator
 
-The substrate under a personal knowledge base: any plain-markdown vault +
+Curator — the Knowledge Plane: the substrate under a personal knowledge base: any plain-markdown vault +
 one embedded index + MCP for agents + a deterministic librarian. Notes
 stay plain files; agents propose, the human decides. Rust workspace,
 pre-release.

@@ -1,4 +1,4 @@
-# Knowledge Plane — architecture
+# Curator — architecture
 
 > **Status:** design baseline for the v1 build. The four published contracts referenced here
 > are authoritative; everything else in this document describes internals that may change
@@ -6,7 +6,7 @@
 
 ## What this is
 
-The Knowledge Plane is **knowledge infrastructure, not another notes app**. It turns any
+Curator (the knowledge plane) is **knowledge infrastructure, not another notes app**. It turns any
 plain-markdown git directory (your vault) plus an optional Zotero library into one
 addressable substrate for reading, notes, and references — with **published contracts** at
 every boundary, so any producer, any reader, and any agent can plug in without bespoke glue.
@@ -26,7 +26,7 @@ Two commitments define the category:
 | | Canonical (yours) | Derived (the plane's) |
 |---|---|---|
 | What | Plain-markdown vault (git), Zotero library | `index.db`, caches, cursors, digests-in-flight |
-| Owner | Human (and producer apps like Curio, inside their marked regions) | Knowledge Plane |
+| Owner | Human (and producer apps like Curio, inside their marked regions) | Curator |
 | Loss cost | Real | Zero — rebuild from canonical |
 | Upgrade story | Never forced | **Blue/green epoch rebuilds, never migrations** |
 
@@ -59,7 +59,7 @@ Six library crates plus one binary, in a single cargo workspace:
 
 | crate | responsibility |
 |---|---|
-| `curator-core` | vault model and atomic I/O, `kp-note/v1` frontmatter parse/validate, identity minting and resolution, checksum-as-change-token, `kp.toml` loading (`kp-config/v1`), Curio manifest ownership oracle, `proposals/v1` create/validate/apply |
+| `curator-core` | vault model and atomic I/O, `kp-note/v1` frontmatter parse/validate, identity minting and resolution, checksum-as-change-token, config loading (`kp-config/v1`: `curator.toml`, legacy `kp.toml`), Curio manifest ownership oracle, `proposals/v1` create/validate/apply |
 | `curator-ingest` | producers → vault/index: the Curio adapter (vanilla `curio.frontmatter.v1` notes, `curio.events.v1` tail with rotation-aware `(file, line)` cursors and `event_id` dedupe), web clips, ingest orchestration |
 | `curator-index` | chunker, `Embedder` trait (`builtin` pinned CPU ONNX, `hash` deterministic test embedder), `index.db` schema, incremental reindex, hybrid retrieval (RRF fusion over vector + FTS legs, one-hop edge expansion), blue/green epoch machinery |
 | `curator-zotero` | two-channel Zotero access: Web API metadata (delta polling via `Last-Modified-Version`, `/deleted` tombstones) + official `/fulltext` as the primary fulltext source, with a small CRC-verified WebDAV `.prop`/`.zip` fallback for self-hosted attachment stores; literature notes land as `kp-note/v1` files in a configured vault dir inside a `kp-zotero:managed` region (like Curio, a producer writing its own marked region), keyed strictly on `zotero:<itemKey>` |
@@ -80,7 +80,7 @@ changes freely.
 | contract | what it governs |
 |---|---|
 | **`kp-note/v1`** | note identity + enrichment frontmatter. `kp_id` is producer-namespaced (`curio:<uuidv7>` \| `zotero:<itemKey>` \| `kp:<uuidv7>` \| `path:<relpath>` fallback). `checksum` is a **change token only, never identity**. **No `status` field** — lifecycle lives index-side. |
-| **`kp-config/v1`** | `kp.toml`: vault path, index path + embedder, Curio seam, Zotero seam, librarian tuning, MCP transport. Unknown keys warn, never fail; secrets only via env/keychain indirection. |
+| **`kp-config/v1`** | `curator.toml` (legacy `kp.toml`): vault path, index path + embedder, Curio seam, Zotero seam, librarian tuning, MCP transport. Unknown keys warn, never fail; secrets only via env/keychain indirection. |
 | **`proposals/v1`** | the only agent write path: `<vault>/.kp/proposals/<ULID>/` with `proposal.json` + `changes.patch`; `curator propose` / `curator review` / `curator apply` run one deterministic validator. **Local-first and forge-free** — the safety model works with no git remote at all. |
 | **MCP surface v1** | `kp_search`, `kp_get_note`, `kp_related`, `kp_recent`, `kp_propose`, `kp_digest_latest`. Tool names/shapes are the contract: adding tools is a minor version, changing shapes is a major. |
 
@@ -96,7 +96,7 @@ flowchart LR
     vault[("markdown vault (git)")]
     zot[("Zotero library")]
   end
-  subgraph kp["Knowledge Plane — derived, disposable"]
+  subgraph kp["Curator — derived, disposable"]
     ing["curator-ingest / curator-zotero"]
     idx[("index.db — sqlite-vec + FTS5 + edge tables")]
     mcp["curator-mcp — MCP surface v1"]
@@ -118,7 +118,7 @@ flowchart LR
 ### Producers feed ingest
 
 - **Curio** (the sibling OSS reader) integrates **by adapter, never by template**: the
-  Knowledge Plane consumes *vanilla* `curio.frontmatter.v1` notes and `curio.events.v1`
+  Curator consumes *vanilla* `curio.frontmatter.v1` notes and `curio.events.v1`
   JSONL against vendored, sha-pinned schemas. `.curio/manifest.json` is read as the
   write-ownership oracle: manifest-listed paths are Curio-owned at the managed-region
   level, proposals touching `.curio/**` are hard-rejected, and KP enrichment of Curio

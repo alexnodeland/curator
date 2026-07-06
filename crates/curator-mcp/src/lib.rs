@@ -1,4 +1,4 @@
-//! Knowledge Plane MCP server — MCP surface v1
+//! Curator MCP server — MCP surface v1
 //! (contract: `contracts/mcp/v1.md`).
 //!
 //! One combined entrypoint: stdio by default, streamable HTTP + bearer

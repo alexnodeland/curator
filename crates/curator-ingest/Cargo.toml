@@ -1,6 +1,6 @@
 [package]
 name = "curator-ingest"
-description = "Knowledge Plane ingest: the Curio adapter (notes + events tail), web clips, ingest orchestration"
+description = "Curator ingest: the Curio adapter (notes + events tail), web clips, ingest orchestration"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

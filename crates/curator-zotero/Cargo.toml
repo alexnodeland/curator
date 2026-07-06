@@ -1,6 +1,6 @@
 [package]
 name = "curator-zotero"
-description = "Knowledge Plane Zotero producer: two-channel read-only access (Web API metadata deltas + /fulltext, CRC-verified WebDAV fallback)"
+description = "Curator Zotero producer: two-channel read-only access (Web API metadata deltas + /fulltext, CRC-verified WebDAV fallback)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

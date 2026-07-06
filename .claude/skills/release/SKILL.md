@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a Knowledge Plane release — gate, version, changelog, tag. Use when asked to release, tag, or publish a version.
+description: Cut a Curator release — gate, version, changelog, tag. Use when asked to release, tag, or publish a version.
 ---
 
 # Release procedure
