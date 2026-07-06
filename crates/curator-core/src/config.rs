@@ -1,6 +1,8 @@
-//! `kp-config/v1` — `kp.toml` (contract: `contracts/kp-config/v1.md`).
+//! `kp-config/v1` — the config file (contract: `contracts/kp-config/v1.md`).
 //!
-//! Binding rules implemented here:
+//! The preferred file name is `curator.toml`; the legacy `kp.toml` name
+//! remains accepted (deprecated, never removed within v1). Binding rules
+//! implemented here:
 //! 1. the config is versioned via the top-level `schema` key;
 //! 2. unknown keys warn (via `tracing`), never fail — a config written for
 //!    a newer minor version must load on an older binary;
@@ -14,7 +16,52 @@ use serde::{Deserialize, Serialize};
 /// The `schema` value this crate implements.
 pub const KP_CONFIG_SCHEMA: &str = "kp-config/v1";
 
-/// Errors from loading `kp.toml`.
+/// The preferred config file name.
+pub const CONFIG_FILE: &str = "curator.toml";
+
+/// The legacy config file name — still accepted, deprecated (kp-config/v1
+/// never removes it).
+pub const CONFIG_FILE_LEGACY: &str = "kp.toml";
+
+/// Where [`discover_config`] found the config path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// Named by an environment variable (`CURATOR_CONFIG` preferred,
+    /// `KP_CONFIG` honored) — the variable name is carried.
+    Env(String),
+    /// `./curator.toml` — the preferred file name.
+    File,
+    /// `./kp.toml` — the legacy file name; callers should surface a
+    /// deprecation note.
+    LegacyFile,
+    /// Nothing found: the preferred name is returned so error paths
+    /// report `curator.toml`.
+    Default,
+}
+
+/// Discover the config path when no explicit `--config` was given:
+/// `$CURATOR_CONFIG` (preferred), then `$KP_CONFIG` (legacy, honored),
+/// then `./curator.toml`, then `./kp.toml` (deprecated), and finally the
+/// preferred default name. Pure — env and filesystem arrive as closures.
+pub fn discover_config(
+    env: impl Fn(&str) -> Option<String>,
+    exists: impl Fn(&str) -> bool,
+) -> (PathBuf, ConfigSource) {
+    for var in ["CURATOR_CONFIG", "KP_CONFIG"] {
+        if let Some(path) = env(var).filter(|v| !v.is_empty()) {
+            return (PathBuf::from(path), ConfigSource::Env(var.to_owned()));
+        }
+    }
+    if exists(CONFIG_FILE) {
+        return (PathBuf::from(CONFIG_FILE), ConfigSource::File);
+    }
+    if exists(CONFIG_FILE_LEGACY) {
+        return (PathBuf::from(CONFIG_FILE_LEGACY), ConfigSource::LegacyFile);
+    }
+    (PathBuf::from(CONFIG_FILE), ConfigSource::Default)
+}
+
+/// Errors from loading the config file.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     /// The file could not be read.
@@ -27,7 +74,7 @@ pub enum ConfigError {
         source: std::io::Error,
     },
     /// The file is not valid TOML or is missing required keys.
-    #[error("invalid kp.toml: {0}")]
+    #[error("invalid config: {0}")]
     Parse(#[from] toml::de::Error),
     /// The `schema` key names a contract this binary does not implement.
     /// Unknown *keys* are tolerated; an unknown *schema* is a different
@@ -39,7 +86,7 @@ pub enum ConfigError {
     },
 }
 
-/// Top-level `kp.toml` model.
+/// Top-level config model (`curator.toml`; legacy name `kp.toml`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KpConfig {
     /// Config contract version, e.g. `kp-config/v1`.
@@ -65,8 +112,9 @@ pub struct KpConfig {
 }
 
 impl KpConfig {
-    /// Load a `kp.toml` file. Unknown keys are logged as warnings and
-    /// otherwise ignored; a wrong `schema` value is an error.
+    /// Load a config file (`curator.toml`, or the legacy `kp.toml`).
+    /// Unknown keys are logged as warnings and otherwise ignored; a wrong
+    /// `schema` value is an error.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
@@ -76,11 +124,11 @@ impl KpConfig {
         Self::from_toml_str(&raw)
     }
 
-    /// Parse a `kp.toml` document. Unknown keys warn via `tracing` — per
+    /// Parse a config document. Unknown keys warn via `tracing` — per
     /// contract they must never be an error.
     pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
         for key in unknown_keys(raw)? {
-            tracing::warn!(key, "unknown kp.toml key ignored (newer config minor?)");
+            tracing::warn!(key, "unknown config key ignored (newer config minor?)");
         }
         let cfg: Self = toml::from_str(raw)?;
         if cfg.schema != KP_CONFIG_SCHEMA {
@@ -190,6 +238,12 @@ pub fn expand_tilde_with(path: &str, home: &Path) -> PathBuf {
 /// Resolve a secret named by an `*_env` config key: the config holds the
 /// VARIABLE NAME, the environment holds the value. Empty names and unset
 /// or empty variables resolve to `None`.
+///
+/// `KP_*` and `CURATOR_*` spellings alias each other: `CURATOR_<X>` is
+/// the preferred spelling and wins when both are set, but the legacy
+/// `KP_<X>` names (the kp-config/v1 defaults, e.g. `KP_ZOTERO_KEY`,
+/// `KP_MCP_TOKEN`) remain honored — existing deployments keep working
+/// unchanged.
 #[must_use]
 pub fn secret_from_env(var_name: &str) -> Option<String> {
     secret_with(var_name, |name| std::env::var(name).ok())
@@ -200,7 +254,16 @@ pub fn secret_with(var_name: &str, get: impl Fn(&str) -> Option<String>) -> Opti
     if var_name.is_empty() {
         return None;
     }
-    get(var_name).filter(|v| !v.is_empty())
+    let non_empty = |name: &str| get(name).filter(|v| !v.is_empty());
+    // CURATOR_* is preferred; KP_* stays honored (in both directions, so a
+    // config written against either naming resolves the other's variable).
+    if let Some(rest) = var_name.strip_prefix("KP_") {
+        return non_empty(&format!("CURATOR_{rest}")).or_else(|| non_empty(var_name));
+    }
+    if let Some(rest) = var_name.strip_prefix("CURATOR_") {
+        return non_empty(var_name).or_else(|| non_empty(&format!("KP_{rest}")));
+    }
+    non_empty(var_name)
 }
 
 /// `[vault]` — the markdown corpus root.
@@ -476,5 +539,101 @@ mod tests {
     #[test]
     fn secret_from_env_unset_is_none() {
         assert_eq!(secret_from_env("KP_DEFINITELY_UNSET_VAR_XYZZY"), None);
+    }
+
+    #[test]
+    fn curator_alias_is_preferred_for_kp_named_variables() {
+        // Both spellings set: CURATOR_* wins.
+        let both = |name: &str| match name {
+            "CURATOR_ZOTERO_KEY" => Some("preferred".to_owned()),
+            "KP_ZOTERO_KEY" => Some("legacy".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            secret_with("KP_ZOTERO_KEY", both),
+            Some("preferred".to_owned())
+        );
+        // Legacy spelling alone keeps working — deployments don't break.
+        let legacy_only = |name: &str| (name == "KP_ZOTERO_KEY").then(|| "legacy".to_owned());
+        assert_eq!(
+            secret_with("KP_ZOTERO_KEY", legacy_only),
+            Some("legacy".to_owned())
+        );
+        // An empty preferred value never shadows a set legacy one.
+        let empty_preferred = |name: &str| match name {
+            "CURATOR_ZOTERO_KEY" => Some(String::new()),
+            "KP_ZOTERO_KEY" => Some("legacy".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            secret_with("KP_ZOTERO_KEY", empty_preferred),
+            Some("legacy".to_owned())
+        );
+    }
+
+    #[test]
+    fn curator_named_variables_fall_back_to_kp_spelling() {
+        let legacy_only = |name: &str| (name == "KP_MCP_TOKEN").then(|| "tok".to_owned());
+        assert_eq!(
+            secret_with("CURATOR_MCP_TOKEN", legacy_only),
+            Some("tok".to_owned())
+        );
+        let both = |name: &str| match name {
+            "CURATOR_MCP_TOKEN" => Some("preferred".to_owned()),
+            "KP_MCP_TOKEN" => Some("legacy".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            secret_with("CURATOR_MCP_TOKEN", both),
+            Some("preferred".to_owned())
+        );
+    }
+
+    #[test]
+    fn config_discovery_prefers_curator_spellings_and_honors_legacy() {
+        let no_env = |_: &str| None;
+        // $CURATOR_CONFIG wins over $KP_CONFIG and any file.
+        let both_env = |name: &str| match name {
+            "CURATOR_CONFIG" => Some("/a.toml".to_owned()),
+            "KP_CONFIG" => Some("/b.toml".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            discover_config(both_env, |_| true),
+            (
+                PathBuf::from("/a.toml"),
+                ConfigSource::Env("CURATOR_CONFIG".to_owned())
+            )
+        );
+        // $KP_CONFIG stays honored.
+        let legacy_env = |name: &str| (name == "KP_CONFIG").then(|| "/b.toml".to_owned());
+        assert_eq!(
+            discover_config(legacy_env, |_| true),
+            (
+                PathBuf::from("/b.toml"),
+                ConfigSource::Env("KP_CONFIG".to_owned())
+            )
+        );
+        // ./curator.toml beats ./kp.toml when both exist.
+        assert_eq!(
+            discover_config(no_env, |_| true),
+            (PathBuf::from("curator.toml"), ConfigSource::File)
+        );
+        // ./kp.toml alone is accepted (deprecated, callers warn).
+        assert_eq!(
+            discover_config(no_env, |name| name == "kp.toml"),
+            (PathBuf::from("kp.toml"), ConfigSource::LegacyFile)
+        );
+        // Nothing found: default to the preferred name.
+        assert_eq!(
+            discover_config(no_env, |_| false),
+            (PathBuf::from("curator.toml"), ConfigSource::Default)
+        );
+        // An empty env value is treated as unset.
+        let empty_env = |_: &str| Some(String::new());
+        assert_eq!(
+            discover_config(empty_env, |_| false).1,
+            ConfigSource::Default
+        );
     }
 }

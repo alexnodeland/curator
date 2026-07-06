@@ -12,7 +12,7 @@ fn curator_bin() -> &'static str {
     env!("CARGO_BIN_EXE_curator")
 }
 
-/// Seed a vault of FILES (no pre-built index) + a hash-embedder kp.toml.
+/// Seed a vault of FILES (no pre-built index) + a hash-embedder curator.toml.
 fn seed_vault(dir: &Path) -> PathBuf {
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).expect("mkdir vault");
@@ -39,7 +39,7 @@ fn seed_vault(dir: &Path) -> PathBuf {
         std::fs::create_dir_all(abs.parent().expect("parent")).expect("mkdir");
         std::fs::write(abs, content).expect("write note");
     }
-    let config_path = dir.join("kp.toml");
+    let config_path = dir.join("curator.toml");
     std::fs::write(
         &config_path,
         format!(
@@ -277,7 +277,7 @@ fn init_scaffolds_a_working_setup() {
         "init failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let config = vault.join("kp.toml");
+    let config = vault.join("curator.toml");
     assert!(config.exists());
     assert!(vault.join(".kp/proposals").is_dir());
     assert!(vault.join("now.md").exists());

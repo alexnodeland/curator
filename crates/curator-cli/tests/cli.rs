@@ -16,7 +16,7 @@ fn curator_bin() -> &'static str {
     env!("CARGO_BIN_EXE_curator")
 }
 
-/// Seed a vault + hash-embedded index; returns the kp.toml path.
+/// Seed a vault + hash-embedded index; returns the curator.toml path.
 fn seed(dir: &Path) -> PathBuf {
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).expect("mkdir vault");
@@ -54,7 +54,7 @@ fn seed(dir: &Path) -> PathBuf {
     }
     index.close().expect("close");
 
-    let config_path = dir.join("kp.toml");
+    let config_path = dir.join("curator.toml");
     std::fs::write(
         &config_path,
         format!(
@@ -268,6 +268,7 @@ fn mcp_serve_http_refuses_without_a_bearer_token() {
         .args(["mcp", "serve", "--http", "--config"])
         .arg(&config)
         .env_remove("KP_MCP_TOKEN")
+        .env_remove("CURATOR_MCP_TOKEN")
         .output()
         .expect("curator runs");
     assert!(!output.status.success(), "must refuse to start");
@@ -300,7 +301,94 @@ fn unknown_config_keys_warn_on_stderr_and_do_not_fail() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("unknown kp.toml key") && stderr.contains("vualt"),
+        stderr.contains("unknown config key") && stderr.contains("vualt"),
         "the promised warning must reach stderr, got: {stderr}"
+    );
+}
+
+/// Config discovery without --config: ./curator.toml is preferred,
+/// ./kp.toml stays accepted (with a deprecation note on stderr), and the
+/// $CURATOR_CONFIG / $KP_CONFIG variables are honored in that order.
+#[test]
+fn config_discovery_prefers_curator_toml_and_accepts_legacy_kp_toml() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path()); // writes ./curator.toml
+
+    let run_in_dir = |cwd: &Path| {
+        Command::new(curator_bin())
+            .args(["recent", "--json"])
+            .current_dir(cwd)
+            .env_remove("CURATOR_CONFIG")
+            .env_remove("KP_CONFIG")
+            .output()
+            .expect("curator runs")
+    };
+
+    // Preferred spelling: found, no deprecation chatter.
+    let out = run_in_dir(dir.path());
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("legacy"),
+        "curator.toml must not warn"
+    );
+
+    // Legacy spelling alone: accepted, and the deprecation note reaches
+    // stderr (kp.toml is never rejected within v1).
+    std::fs::rename(&config, dir.path().join("kp.toml")).expect("rename to legacy");
+    let out = run_in_dir(dir.path());
+    assert!(
+        out.status.success(),
+        "kp.toml must still work: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("legacy") && stderr.contains("curator.toml"),
+        "deprecation note must reach stderr, got: {stderr}"
+    );
+
+    // Both present: curator.toml wins. Point the curator.toml at a valid
+    // config and the kp.toml at garbage — success proves precedence.
+    std::fs::copy(dir.path().join("kp.toml"), dir.path().join("curator.toml")).expect("copy back");
+    std::fs::write(dir.path().join("kp.toml"), "schema = \"nonsense/v9\"\n")
+        .expect("poison legacy");
+    let out = run_in_dir(dir.path());
+    assert!(
+        out.status.success(),
+        "curator.toml must win over kp.toml: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Env-var names: $KP_CONFIG keeps working, $CURATOR_CONFIG is
+    // preferred when both are set.
+    let elsewhere = tempfile::tempdir().expect("tempdir");
+    let good = dir.path().join("curator.toml");
+    let out = Command::new(curator_bin())
+        .args(["recent", "--json"])
+        .current_dir(elsewhere.path())
+        .env_remove("CURATOR_CONFIG")
+        .env("KP_CONFIG", &good)
+        .output()
+        .expect("curator runs");
+    assert!(
+        out.status.success(),
+        "$KP_CONFIG must keep working: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = Command::new(curator_bin())
+        .args(["recent", "--json"])
+        .current_dir(elsewhere.path())
+        .env("CURATOR_CONFIG", &good)
+        .env("KP_CONFIG", "/nonexistent/kp.toml")
+        .output()
+        .expect("curator runs");
+    assert!(
+        out.status.success(),
+        "$CURATOR_CONFIG must be preferred: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }

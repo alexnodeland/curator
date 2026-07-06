@@ -206,4 +206,25 @@ mod tests {
         let token = resolve_bearer_token_with(&mcp, |_| Some("s3cret".into())).expect("resolves");
         assert_eq!(token, "s3cret");
     }
+
+    /// The default config names `KP_MCP_TOKEN`; the preferred
+    /// `CURATOR_MCP_TOKEN` alias resolves through the same seam (and wins
+    /// when both are set) — legacy deployments keep working either way.
+    #[test]
+    fn curator_alias_resolves_the_default_token_variable() {
+        let mcp = McpConfig::default(); // bearer_token_env = "KP_MCP_TOKEN"
+        let alias_only = |name: &str| (name == "CURATOR_MCP_TOKEN").then(|| "aliased".to_owned());
+        let token = resolve_bearer_token_with(&mcp, alias_only).expect("alias resolves");
+        assert_eq!(token, "aliased");
+
+        let both = |name: &str| match name {
+            "CURATOR_MCP_TOKEN" => Some("preferred".to_owned()),
+            "KP_MCP_TOKEN" => Some("legacy".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_bearer_token_with(&mcp, both).expect("resolves"),
+            "preferred"
+        );
+    }
 }

@@ -1,6 +1,9 @@
-# Knowledge Plane configuration — kp-config/v1 (contracts/kp-config/v1.md).
-# Copy to kp.toml and edit. Unknown keys warn, never fail.
+# Curator configuration — kp-config/v1 (contracts/kp-config/v1.md).
+# Copy to curator.toml and edit (the legacy name kp.toml is still
+# accepted). Unknown keys warn, never fail.
 # Secrets only via env/keychain indirection — never values in this file.
+# KP_*-named variables have preferred CURATOR_* aliases: CURATOR_<X> wins
+# when both are set, KP_<X> keeps working.
 
 schema = "kp-config/v1"
 
@@ -23,7 +26,7 @@ notes_dirs = ["curio"]                       # vault-relative dirs Curio exports
 enabled = false
 api_base = "https://api.zotero.org"
 user_id = ""
-api_key_env = "KP_ZOTERO_KEY"    # never inline; env or keychain ref
+api_key_env = "KP_ZOTERO_KEY"    # never inline; CURATOR_ZOTERO_KEY preferred alias
 webdav_fallback = false          # ~30-line CRC-verified .prop/.zip shim
 webdav_url = ""
 
@@ -36,4 +39,4 @@ top_k = 12
 [mcp]
 transport = "stdio"              # stdio (default) | http
 http_bind = "127.0.0.1:8377"
-bearer_token_env = "KP_MCP_TOKEN" # required when transport = http
+bearer_token_env = "KP_MCP_TOKEN" # required when http; CURATOR_MCP_TOKEN preferred alias
