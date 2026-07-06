@@ -18,17 +18,34 @@ after the first) the same loop is sub-second.
 > - No database server, no model server, no daemon. One binary, one
 >   SQLite file.
 
-## Build the binary
+## Install the binary
+
+The primary install is Cargo, straight from the source tree:
 
 ```sh
 git clone https://github.com/alexnodeland/curator && cd curator
-cargo build --release -p curator-cli
-# the binary: target/release/curator
+cargo install --locked --path crates/curator-cli
+curator --version
 ```
 
-The default build compiles the in-process ONNX embedder; `cargo build`
+(equivalently, without a checkout:
+`cargo install --locked --git https://github.com/alexnodeland/curator curator-cli`;
+crates.io publication is a staged follow-up while pre-release. Tagged
+releases also ship prebuilt linux x86_64 + macOS arm64 binaries with
+checksums, and a container image builds from the repo's `Dockerfile` —
+see [Operations](operations.md#containers).)
+
+The default build compiles the in-process ONNX embedder; the build
 fetches ONNX Runtime binaries at build time (via the `ort` download
-feature).
+feature). For development, `cargo build --release -p curator-cli`
+produces the same binary at `target/release/curator`.
+
+**Want to see the loop before pointing it at your own notes?** The
+repo bundles a 12-note sample vault and a non-interactive walk-through:
+
+```sh
+just demo    # scratch-dir init → ingest → search → digest, fully offline
+```
 
 ## Init, ingest, search
 
