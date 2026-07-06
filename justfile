@@ -9,6 +9,7 @@ setup:
     lefthook install
     rustup component add rustfmt clippy llvm-tools-preview
     cargo llvm-cov --version >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked
+    cargo deny --version >/dev/null 2>&1 || cargo install cargo-deny --locked
 
 # Build every workspace crate
 build:
@@ -43,6 +44,11 @@ lean-check:
 
 # fmt-check + clippy + litmus
 lint: fmt-check clippy litmus
+
+# License audit: the shipped dependency tree stays permissive-only
+# (allow-list + the one scoped exception live in deny.toml)
+deny:
+    cargo deny check licenses
 
 # API docs, warnings are errors (curator-core also gates missing_docs)
 doc:
@@ -98,5 +104,7 @@ demo:
     echo
     echo "demo vault: $scratch/vault (config inside; rerun with 'just demo')"
 
-# Everything CI runs, in CI's order
-ci: fmt-check clippy test doc litmus lean-check site cov
+# Everything CI's gate jobs run: the ci job's steps in its order, plus
+# the license audit (its own job in ci.yml). The secret scan
+# (gitleaks) and the weekly real-model e2e run CI-side only.
+ci: fmt-check clippy test doc litmus lean-check site cov deny

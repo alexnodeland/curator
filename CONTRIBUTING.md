@@ -14,11 +14,13 @@ this document exists so the workflow is public from day one.
   the deterministic `hash` embedder; producer tests use checked-in
   fixtures.
 - **Gates are the review.** `just ci` (fmt, clippy with warnings denied,
-  tests, rustdoc with warnings denied, the grep litmus, and the coverage
-  gate — region coverage >= 80% on curator-core/curator-index/curator-librarian) must be
-  green before any commit is proposed. Pre-commit hooks enforce the fast
-  half locally: `just setup` once (it also installs `cargo-llvm-cov`).
-  A failing coverage gate means missing tests — never exclusions.
+  tests, rustdoc with warnings denied, the grep litmus, the coverage
+  gate — region coverage >= 80% on curator-core/curator-index/curator-librarian — and
+  the cargo-deny license audit) must be green before any commit is
+  proposed. Pre-commit hooks enforce the fast half locally: `just setup`
+  once (it also installs `cargo-llvm-cov` and `cargo-deny`). A failing
+  coverage gate means missing tests — never exclusions; a failing
+  license audit means a copyleft dependency — never a routine allow.
 - **Conventional Commits** — `type(scope)?: summary`, types:
   feat fix docs refactor chore ci test perf build revert.
 - **Public-safety litmus.** This repo describes a product, never a

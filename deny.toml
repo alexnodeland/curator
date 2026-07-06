@@ -1,0 +1,58 @@
+# cargo-deny — the license audit (`just deny`, and the `license-audit`
+# CI job). The check proves the release-binary dependency tree carries
+# no copyleft: everything must match the permissive allow-list below.
+#
+# Workspace crates are `publish = false` (pre-release) and carry no
+# `license` field yet — `private.ignore` skips them; the audit is about
+# what we SHIP FROM others, not what we haven't decided for ourselves
+# (the repo license is deliberately TBD, see README).
+
+[graph]
+# Audit the shipped artifact set: every target the release workflow
+# builds. (Without this, cargo-deny unions ALL possible targets.)
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+]
+all-features = true
+
+[licenses]
+version = 2
+# Permissive-only. Adding a copyleft license here is a decision for a
+# human, made in a PR that explains why — never a routine unblock.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Zlib",
+]
+private = { ignore = true }
+
+# The one non-permissive license in the tree, scoped to the one crate
+# that carries it: option-ext (a transitive dep of `dirs`, via hf-hub)
+# is MPL-2.0 — FILE-scoped weak copyleft. Unmodified use in a compiled
+# binary imposes no obligations on our code; a blanket MPL allow would
+# still be wrong, so the exception names the crate.
+exceptions = [
+    { name = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
