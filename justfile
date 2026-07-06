@@ -104,6 +104,46 @@ demo:
     echo
     echo "demo vault: $scratch/vault (config inside; rerun with 'just demo')"
 
+# The REAL end-to-end loop — the release blocker: builtin ONNX
+# embedder, real model, ingest -> search must hit. First run fetches
+# the pinned ~130 MB model into target/e2e-real/state/models (kept
+# across runs; CI caches it), the index is rebuilt fresh every run.
+e2e-real:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    state="$PWD/target/e2e-real/state"
+    scratch="$PWD/target/e2e-real/run"
+    rm -rf "$scratch"
+    rm -f "$state"/index.db*
+    mkdir -p "$scratch" "$state"
+    cp -R examples/sample-vault "$scratch/vault"
+    cargo build --release -p curator-cli
+    bin=target/release/curator
+    cfg="$scratch/curator.toml"
+    printf '%s\n' \
+        'schema = "kp-config/v1"' \
+        '[vault]' "path = \"$scratch/vault\"" \
+        '[index]' "path = \"$state/index.db\"" 'embedder = "builtin"' \
+        > "$cfg"
+    echo "== ingest (builtin ONNX embedder) =="
+    "$bin" ingest --config "$cfg" --json
+    echo "== search must return semantically-ranked hits =="
+    "$bin" search "getting the espresso grinder setting right" --config "$cfg" --json \
+        > "$scratch/search.json"
+    python3 - "$scratch/search.json" <<'EOF'
+    import json, sys
+    out = json.load(open(sys.argv[1]))
+    results = out["results"]
+    assert results, "real-embedder search returned no hits"
+    top = results[0]
+    print(f"top hit: {top['id']}  (score {top['score']:.4f})")
+    assert "espresso" in top["path"], f"expected the espresso note on top, got {top['path']}"
+    EOF
+    echo "== digest + doctor stay healthy on a real index =="
+    "$bin" digest run --config "$cfg"
+    "$bin" doctor --config "$cfg"
+    echo "e2e-real: PASS"
+
 # Everything CI's gate jobs run: the ci job's steps in its order, plus
 # the license audit (its own job in ci.yml). The secret scan
 # (gitleaks) and the weekly real-model e2e run CI-side only.

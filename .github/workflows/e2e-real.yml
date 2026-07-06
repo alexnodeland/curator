@@ -1,0 +1,48 @@
+# The REAL end-to-end loop (`just e2e-real`) — the RELEASE BLOCKER.
+#
+# The per-commit gate (ci.yml) is hermetic by doctrine: the hash
+# embedder backs every test, nothing downloads anything. This workflow
+# is the deliberate exception that keeps that doctrine honest: weekly
+# (and on demand) it exercises the builtin ONNX embedder with the real
+# pinned model — ingest the sample vault, semantic search must rank the
+# right note on top, digest and doctor must stay healthy.
+#
+# Release policy: a release is BLOCKED unless this is green —
+# release.yml runs the same `just e2e-real` as a prerequisite job, so
+# the policy is enforced by machinery, not memory. The weekly schedule
+# exists to surface rot (model CDN drift, ort updates, HF availability)
+# long before a release day does.
+#
+# The pinned model (~130 MB) is cached; the cache key embeds the model
+# id, so repinning the embedder busts the cache by construction.
+
+name: e2e-real
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday 06:17 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@just
+
+      - name: cache the pinned embedding model
+        uses: actions/cache@v4
+        with:
+          path: target/e2e-real/state/models
+          key: e2e-onnx-model-bge-small-en-v1.5
+
+      - name: the real loop (builtin ONNX embedder, pinned model)
+        run: just e2e-real

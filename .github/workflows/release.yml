@@ -1,0 +1,109 @@
+# Release — on tag v*: prove the real-model loop (the release blocker),
+# build the `curator` binaries for linux x86_64 + macOS arm64, checksum
+# them, and open a DRAFT GitHub release. Publishing the draft is a
+# human act, always — this workflow never ships anything on its own.
+#
+#   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# Binaries are the default build (builtin ONNX embedder compiled in;
+# the first embedding command fetches the pinned model, announced).
+# crates.io publishing is a staged follow-up, deliberately not here.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The release blocker (see e2e-real.yml): the same `just e2e-real`
+  # the weekly schedule runs, enforced at the gate itself.
+  e2e-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@just
+
+      - uses: actions/cache@v4
+        with:
+          path: target/e2e-real/state/models
+          key: e2e-onnx-model-bge-small-en-v1.5
+
+      - name: the real loop (builtin ONNX embedder, pinned model)
+        run: just e2e-real
+
+  build:
+    needs: e2e-real
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: build (release, locked)
+        run: cargo build --release --locked -p curator-cli --target ${{ matrix.target }}
+
+      - name: smoke-test the binary
+        run: target/${{ matrix.target }}/release/curator --version
+
+      - name: package
+        run: |
+          staging="curator-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$staging"
+          cp "target/${{ matrix.target }}/release/curator" "$staging/"
+          cp README.md curator.example.toml "$staging/"
+          tar -czf "$staging.tar.gz" "$staging"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: curator-${{ matrix.target }}
+          path: curator-*.tar.gz
+          if-no-files-found: error
+
+  draft-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum curator-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # draft: true — the human-gated publish. Review the draft, write
+      # the notes, press the button.
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/curator-*.tar.gz
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
