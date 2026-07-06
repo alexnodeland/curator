@@ -2,7 +2,7 @@
 
 > **Status: pre-release.** Contracts v1, APIs settling. Installs from
 > source (crates.io publication is a staged follow-up).
-> **License: TBD — private until launch.**
+> **License: [MIT](LICENSE).**
 
 Curator is the knowledge plane under your personal knowledge system:
 **any plain-markdown vault** + **one index database** + **MCP for
@@ -113,5 +113,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md),
 
 ## License
 
-**TBD — private until launch.** No license has been chosen yet; until
-one is, no rights are granted beyond viewing.
+[MIT](LICENSE) © 2026 Alex Nodeland.

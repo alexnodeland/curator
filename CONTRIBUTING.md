@@ -41,6 +41,6 @@ this document exists so the workflow is public from day one.
 
 ## License note
 
-The license is deliberately undecided (see README). By the nature of the
-pre-release phase, do not add license headers, a LICENSE file, or
-`license` metadata.
+Curator is [MIT](LICENSE) licensed. Contributions are accepted under the
+same terms; there is no need for per-file license headers (the top-level
+`LICENSE` and the `license = "MIT"` workspace metadata cover the tree).

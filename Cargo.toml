@@ -18,7 +18,7 @@ edition = "2024"
 rust-version = "1.89"
 # Pre-release: nothing is published to crates.io yet.
 publish = false
-# NOTE: no `license` field — the license is deliberately undecided (see README).
+license = "MIT"
 
 [workspace.dependencies]
 # Intra-workspace crates (dependency direction is strictly downward:
