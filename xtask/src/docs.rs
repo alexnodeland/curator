@@ -467,6 +467,12 @@ fn escape_html(text: &str) -> String {
 /// and (only when needed) the vendored mermaid bundle.
 fn page_shell(title: &str, converted: &Converted, sections: &[NavSection], page: &str) -> String {
     let prefix = rel_prefix(page);
+    // "Quickstart — Curator", but never "Curator — Curator" on the landing page.
+    let tab_title = if title == "Curator" {
+        title.to_owned()
+    } else {
+        format!("{title} — Curator")
+    };
     let mut nav = String::new();
     for section in sections {
         let _ = write!(nav, "<h2>{}</h2>\n<ul>\n", escape_html(&section.title));
@@ -499,7 +505,7 @@ fn page_shell(title: &str, converted: &Converted, sections: &[NavSection], page:
          <head>\n\
          <meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title} — Curator</title>\n\
+         <title>{title}</title>\n\
          <link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128218;</text></svg>\">\n\
          <link rel=\"stylesheet\" href=\"{prefix}assets/style.css\">\n\
          </head>\n\
@@ -518,7 +524,7 @@ fn page_shell(title: &str, converted: &Converted, sections: &[NavSection], page:
          {mermaid}\
          </body>\n\
          </html>\n",
-        title = escape_html(title),
+        title = escape_html(&tab_title),
         body = converted.body,
     )
 }
