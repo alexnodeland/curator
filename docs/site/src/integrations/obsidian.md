@@ -27,6 +27,34 @@ tools see the same files:
 - **`now.md` is just a note.** Edit the librarian's interest anchor
   wherever you like editing markdown.
 
+## Obsidian's Web Viewer is also a producer
+
+Obsidian's core **Web Viewer** plugin doesn't just browse the web in a tab —
+its **Save to vault** turns the page you're reading into a markdown note with
+YAML frontmatter (a `source` URL, `title`, `author`, date, `tags`). Curator's
+**web-clip adapter** recognizes those notes and maps their frontmatter onto
+`kp-note/v1` during ingest, so **ad-hoc web reading becomes a first-class
+source** — searchable, citable by its source URL, tag-filterable, and
+recency-ranked — right alongside your feeds and papers. Two capture arms, one
+plane: subscriptions come in through Curio, ad-hoc pages through the Web Viewer,
+and both land as markdown that Curator indexes uniformly.
+
+- **Tolerant, not a pinned contract.** Clippers let you edit the property
+  template, so the adapter *aliases* the common keys (`source` **or** `url`;
+  `published`/`created`/`date`; a `tags` list or comma string) and never fails
+  — a note that isn't a recognizable web clip (no `http(s)` source) is just an
+  ordinary note. The defining signal is the source URL the clip came from.
+- **The file is never rewritten.** Like every producer, the Web Viewer keeps
+  byte-ownership of its own frontmatter; the adapter only synthesizes the
+  in-memory indexed view. Identity stays `path:<relpath>` — no `kp-note/v1`
+  contract change.
+- **Any clipper works.** The mapping keys on shape, not on Obsidian: a browser
+  extension, a shell script, or a different app that writes `source`-bearing
+  markdown into the vault is recognized the same way.
+
+`curator ingest` reports how many it mapped (`web clips: N …`, and `web_clips`
+in `--json`).
+
 ## Two hygiene rules
 
 1. **Keep derived state out of git.** `.kp/` (proposals staging,

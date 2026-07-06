@@ -43,6 +43,9 @@ pub struct IngestReport {
     pub ignored: usize,
     /// Valid Curio notes among the scanned.
     pub curio_notes: usize,
+    /// Browser read-and-save notes (a Web Viewer, a clipper) mapped
+    /// onto `kp-note/v1` by the web-clip adapter.
+    pub web_clips: usize,
     /// Index rows removed because their files vanished from the vault.
     pub removed: usize,
     /// Outgoing links recorded from (re)indexed notes.
@@ -68,6 +71,8 @@ struct Corpus {
     /// Parse failures + Curio schema violations + duplicate identities.
     skipped: usize,
     curio_notes: usize,
+    /// Browser read-and-save notes recognized by the web-clip adapter.
+    web_clips: usize,
     /// Paths that still exist on disk and stayed eligible — used by the
     /// vanish-pruning pass. Parse-skipped files stay eligible: a
     /// transiently broken file must not evict its indexed rows.
@@ -100,7 +105,13 @@ fn prepare_corpus(vault: &Vault, adapter: &CurioAdapter) -> Result<Corpus, Inges
                 corpus.skipped += 1;
                 continue;
             }
-            CurioAdapt::NotCurio => walked.note,
+            CurioAdapt::NotCurio => match crate::webclip::adapt_webclip(&walked.note) {
+                Some(clip) => {
+                    corpus.web_clips += 1;
+                    clip
+                }
+                None => walked.note,
+            },
         };
         // The change token covers the WHOLE (possibly adapted) note —
         // mirrors what upsert_note_prechunked stores in notes.checksum.
@@ -156,6 +167,7 @@ pub fn ingest(config: &KpConfig, embedder: &dyn Embedder) -> Result<IngestReport
         ignored: corpus.ignored,
         skipped: corpus.skipped,
         curio_notes: corpus.curio_notes,
+        web_clips: corpus.web_clips,
         ..Default::default()
     };
     let prepared = &corpus.prepared;
