@@ -1,0 +1,30 @@
+[package]
+name = "curator-zotero"
+description = "Knowledge Plane Zotero producer: two-channel read-only access (Web API metadata deltas + /fulltext, CRC-verified WebDAV fallback)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+crc32fast = "1.5.0"
+curator-core = { workspace = true }
+# The workspace dep pins default-features = false: the curator-cli binary
+# (not this library) decides whether the ONNX stack is compiled in.
+curator-index = { workspace = true }
+quick-xml = "0.41.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror = { workspace = true }
+tracing.workspace = true
+zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+temp-env = "0.3.6"
+tempfile.workspace = true
+tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
+wiremock = "0.6.5"

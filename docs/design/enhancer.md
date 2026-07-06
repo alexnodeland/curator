@@ -24,7 +24,7 @@ in the loop.
 
 ## The loop, step by step
 
-1. **The deterministic digest runs first** (scheduled `kp digest run
+1. **The deterministic digest runs first** (scheduled `curator digest run
    --auto`). It writes `digests/<date>.md` through an auto-applied
    proposal: wikilinks, extractive one-line summaries, why-surfaced
    notes, quiet tail. This artifact is complete and useful as-is —
@@ -39,7 +39,7 @@ in the loop.
    extractive first paragraphs, connective tissue between clustered
    items, a headline.
 4. **It submits a superseding proposal** (`kp_propose` /
-   `kp propose`): the same digest note path, rewritten body. Two hard
+   `curator propose`): the same digest note path, rewritten body. Two hard
    shape rules, enforced by the validator and by convention:
    - the **frontmatter identity is preserved** — same `kp_id`, same
      `kp_schema`, same `tags: [digest]`; the enhancer changes prose,
@@ -49,7 +49,7 @@ in the loop.
      wikilink; the enhancer may reorder within clusters, rewrite
      sentences, and retitle sections, but a digest that *drops* items is
      not an enhancement, it is a different digest.
-5. **A human (or a standing rule) applies it** — `kp apply <id>`. This
+5. **A human (or a standing rule) applies it** — `curator apply <id>`. This
    proposal *modifies* an existing file outside nothing-but-additions
    territory, so **it never auto-applies**: the auto-apply gate admits
    only pure additions under the digest dir. Enhanced prose always has a

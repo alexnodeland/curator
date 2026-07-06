@@ -51,8 +51,8 @@ to run, and the entire "agent proposes, a different process disposes" security s
 evaporates — or worse, the docs imply you should push your private personal notes to a
 forge to get safety, contradicting the local-first privacy posture.
 
-**Consequence.** `proposals/v1` is a local mechanism: `kp propose` writes a changeset
-under `<vault>/.kp/proposals/<ULID>/`, and `kp review` / `kp apply` run one importable,
+**Consequence.** `proposals/v1` is a local mechanism: `curator propose` writes a changeset
+under `<vault>/.kp/proposals/<ULID>/`, and `curator review` / `curator apply` run one importable,
 deterministic validator (schema, path allowlist, ownership-oracle refusal, clean patch
 application) in-process. Forge CI + branch protection is an *optional hardening tier* that
 runs the exact same validator module. The safety model works with zero infrastructure.
@@ -78,7 +78,7 @@ prerequisites included.
 
 **Build reality check (2026-07-03).** The rule for the cargo wiring was: try
 `embed-onnx` (fastembed + ort, pinned `BGE-small-en-v1.5`, 384 dims) as a DEFAULT
-feature of `kp-index`, and demote it to opt-in only if it failed to build cleanly on
+feature of `curator-index`, and demote it to opt-in only if it failed to build cleanly on
 Apple Silicon — the quickstart must never lie about what a default build delivers.
 It built and linked cleanly (ort 2.0.0-rc.12, downloaded CPU binaries), so **the
 default stands**: a stock `cargo build` includes the `builtin` embedder, matching the

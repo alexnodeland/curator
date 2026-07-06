@@ -1,0 +1,49 @@
+[package]
+name = "curator-index"
+description = "Knowledge Plane index: chunker, Embedder trait (builtin ONNX / hash test embedder), one embedded index.db (vectors + FTS + edges), hybrid retrieval, blue/green epochs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+curator-core = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+sqlite-vec = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# The pinned in-process CPU ONNX embedder (`builtin`), on by default for
+# this crate — verified to build and link cleanly on Apple Silicon (see
+# docs/design/decisions.md §4). Model fetch is lazy, so the DEFAULT test
+# suite stays hermetic. NOTE: the `ort-download-binaries-*` feature means
+# `cargo build` with this feature fetches ONNX Runtime binaries from the
+# pyke CDN at BUILD time. Library consumers in this workspace depend on
+# curator-index with default-features = false; the `curator` binary opts in via
+# curator-cli's default `embed-onnx` feature, so
+# `cargo build -p curator-cli --no-default-features` is a lean, download-free
+# build (gated in CI via `just lean-check`).
+fastembed = { version = "5.17", optional = true, default-features = false, features = [
+    "ort-download-binaries-native-tls",
+    "hf-hub-native-tls",
+] }
+
+[features]
+default = ["embed-onnx"]
+embed-onnx = ["dep:fastembed"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# The workspace forbids unsafe outright; this crate alone scopes that to
+# `deny` because registering the sqlite-vec extension goes through
+# sqlite3_auto_extension — a raw FFI entry point rusqlite cannot wrap
+# safely. Exactly one site (db.rs::register_sqlite_vec) carries a local
+# `#[allow(unsafe_code)]` with the safety argument.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"

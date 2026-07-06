@@ -59,17 +59,17 @@ Six library crates plus one binary, in a single cargo workspace:
 
 | crate | responsibility |
 |---|---|
-| `kp-core` | vault model and atomic I/O, `kp-note/v1` frontmatter parse/validate, identity minting and resolution, checksum-as-change-token, `kp.toml` loading (`kp-config/v1`), Curio manifest ownership oracle, `proposals/v1` create/validate/apply |
-| `kp-ingest` | producers → vault/index: the Curio adapter (vanilla `curio.frontmatter.v1` notes, `curio.events.v1` tail with rotation-aware `(file, line)` cursors and `event_id` dedupe), web clips, ingest orchestration |
-| `kp-index` | chunker, `Embedder` trait (`builtin` pinned CPU ONNX, `hash` deterministic test embedder), `index.db` schema, incremental reindex, hybrid retrieval (RRF fusion over vector + FTS legs, one-hop edge expansion), blue/green epoch machinery |
-| `kp-zotero` | two-channel Zotero access: Web API metadata (delta polling via `Last-Modified-Version`, `/deleted` tombstones) + official `/fulltext` as the primary fulltext source, with a small CRC-verified WebDAV `.prop`/`.zip` fallback for self-hosted attachment stores; literature notes land as `kp-note/v1` files in a configured vault dir inside a `kp-zotero:managed` region (like Curio, a producer writing its own marked region), keyed strictly on `zotero:<itemKey>` |
-| `kp-mcp` | the one MCP entrypoint (built on `rmcp`): stdio default, streamable HTTP + bearer token optional — MCP surface v1 |
-| `kp-librarian` | deterministic-first maintenance and digest loops (see below); optional LLM harness adapter as a prose enhancer |
-| `kp` (binary) | the CLI: `init`, `ingest`, `reindex`, `search`, `mcp`, `propose`/`review`/`apply`, `digest`, `status` |
+| `curator-core` | vault model and atomic I/O, `kp-note/v1` frontmatter parse/validate, identity minting and resolution, checksum-as-change-token, `kp.toml` loading (`kp-config/v1`), Curio manifest ownership oracle, `proposals/v1` create/validate/apply |
+| `curator-ingest` | producers → vault/index: the Curio adapter (vanilla `curio.frontmatter.v1` notes, `curio.events.v1` tail with rotation-aware `(file, line)` cursors and `event_id` dedupe), web clips, ingest orchestration |
+| `curator-index` | chunker, `Embedder` trait (`builtin` pinned CPU ONNX, `hash` deterministic test embedder), `index.db` schema, incremental reindex, hybrid retrieval (RRF fusion over vector + FTS legs, one-hop edge expansion), blue/green epoch machinery |
+| `curator-zotero` | two-channel Zotero access: Web API metadata (delta polling via `Last-Modified-Version`, `/deleted` tombstones) + official `/fulltext` as the primary fulltext source, with a small CRC-verified WebDAV `.prop`/`.zip` fallback for self-hosted attachment stores; literature notes land as `kp-note/v1` files in a configured vault dir inside a `kp-zotero:managed` region (like Curio, a producer writing its own marked region), keyed strictly on `zotero:<itemKey>` |
+| `curator-mcp` | the one MCP entrypoint (built on `rmcp`): stdio default, streamable HTTP + bearer token optional — MCP surface v1 |
+| `curator-librarian` | deterministic-first maintenance and digest loops (see below); optional LLM harness adapter as a prose enhancer |
+| `curator` (binary) | the CLI: `init`, `ingest`, `reindex`, `search`, `mcp`, `propose`/`review`/`apply`, `digest`, `status` |
 
-Dependency direction is strictly downward: `kp` → (`kp-ingest`, `kp-zotero`, `kp-mcp`,
-`kp-librarian`) → `kp-index` → `kp-core`. Retrieval is in-process — the MCP server links
-`kp-index` directly; there is no internal network API.
+Dependency direction is strictly downward: `curator` → (`curator-ingest`, `curator-zotero`, `curator-mcp`,
+`curator-librarian`) → `curator-index` → `curator-core`. Retrieval is in-process — the MCP server links
+`curator-index` directly; there is no internal network API.
 
 ## Exactly four published contracts
 
@@ -81,7 +81,7 @@ changes freely.
 |---|---|
 | **`kp-note/v1`** | note identity + enrichment frontmatter. `kp_id` is producer-namespaced (`curio:<uuidv7>` \| `zotero:<itemKey>` \| `kp:<uuidv7>` \| `path:<relpath>` fallback). `checksum` is a **change token only, never identity**. **No `status` field** — lifecycle lives index-side. |
 | **`kp-config/v1`** | `kp.toml`: vault path, index path + embedder, Curio seam, Zotero seam, librarian tuning, MCP transport. Unknown keys warn, never fail; secrets only via env/keychain indirection. |
-| **`proposals/v1`** | the only agent write path: `<vault>/.kp/proposals/<ULID>/` with `proposal.json` + `changes.patch`; `kp propose` / `kp review` / `kp apply` run one deterministic validator. **Local-first and forge-free** — the safety model works with no git remote at all. |
+| **`proposals/v1`** | the only agent write path: `<vault>/.kp/proposals/<ULID>/` with `proposal.json` + `changes.patch`; `curator propose` / `curator review` / `curator apply` run one deterministic validator. **Local-first and forge-free** — the safety model works with no git remote at all. |
 | **MCP surface v1** | `kp_search`, `kp_get_note`, `kp_related`, `kp_recent`, `kp_propose`, `kp_digest_latest`. Tool names/shapes are the contract: adding tools is a minor version, changing shapes is a major. |
 
 Contract discipline: additive changes in minors, breaking changes in majors, per-contract
@@ -97,10 +97,10 @@ flowchart LR
     zot[("Zotero library")]
   end
   subgraph kp["Knowledge Plane — derived, disposable"]
-    ing["kp-ingest / kp-zotero"]
+    ing["curator-ingest / curator-zotero"]
     idx[("index.db — sqlite-vec + FTS5 + edge tables")]
-    mcp["kp-mcp — MCP surface v1"]
-    lib["kp-librarian — deterministic digest"]
+    mcp["curator-mcp — MCP surface v1"]
+    lib["curator-librarian — deterministic digest"]
   end
   curio -- "exports frontmatter/v1 notes" --> vault
   curio -- "events/v1 (behavioral, never in git)" --> ing
@@ -112,7 +112,7 @@ flowchart LR
   mcp <--> agents["agents (MCP clients)"]
   agents -- "kp_propose" --> prop[".kp/proposals — proposals/v1"]
   lib -- "digest proposal" --> prop
-  prop -- "kp apply: validate, then human authority" --> vault
+  prop -- "curator apply: validate, then human authority" --> vault
 ```
 
 ### Producers feed ingest
@@ -159,9 +159,9 @@ system is fully functional without it.
 
 ### Proposals are the only write path
 
-`kp propose` captures a changeset; the validator hard-rejects anything touching
+`curator propose` captures a changeset; the validator hard-rejects anything touching
 `.curio/**`, Curio machine frontmatter keys or managed regions, paths outside the vault,
-or patches that don't apply cleanly; `kp review` renders it; `kp apply` applies and stamps
+or patches that don't apply cleanly; `curator review` renders it; `curator apply` applies and stamps
 status. The identical validator can run as a forge CI gate for hardened remote
 deployments — but the forge is optional. A laptop with no remote gets the full safety
 model.

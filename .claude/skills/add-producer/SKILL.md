@@ -24,7 +24,7 @@ regions).
    (`<producer>:<their-stable-id>`) and document it in
    `contracts/kp-note/v1.md` — that IS a contract change, so follow
    `.claude/skills/contract-change/` (additive → minor).
-3. **Write the adapter in `kp-ingest`** (`src/<producer>.rs`):
+3. **Write the adapter in `curator-ingest`** (`src/<producer>.rs`):
    - validate every input against the vendored schema at the boundary;
    - map the producer's id → `kp_id`; producer checksum stays a change
      token only;
@@ -35,7 +35,7 @@ regions).
    - events (if any): rotation-aware `(file, line)` cursors, dedupe by
      event id, tolerate vanished files; behavioral data never goes to git.
 4. **Config seam.** Add a `[<producer>]` table (with `enabled = false`
-   default) via a contract change to `kp-config/v1` + `kp.example.toml`.
+   default) via a contract change to `kp-config/v1` + `curator.example.toml`.
 5. **Hermetic tests only.** Fixture files checked into the crate's
    `tests/fixtures/`; the `hash` embedder for anything embedding-shaped;
    no network, no producer binary required.

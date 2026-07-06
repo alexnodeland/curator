@@ -190,7 +190,7 @@ mod tests {
     impl TempRepo {
         fn new(tag: &str) -> Self {
             let root = std::env::temp_dir().join(format!(
-                "kp-litmus-{tag}-{}-{:?}",
+                "curator-litmus-{tag}-{}-{:?}",
                 std::process::id(),
                 std::thread::current().id()
             ));
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn clean_tree_produces_no_findings() {
         let repo = TempRepo::new("clean");
-        repo.write("crates/kp-core/src/lib.rs", "pub fn nothing() {}\n");
+        repo.write("crates/curator-core/src/lib.rs", "pub fn nothing() {}\n");
         repo.write("contracts/kp-note/v1.md", "# kp-note/v1\n");
         assert_eq!(scan(&repo.root).expect("scan").len(), 0);
     }
@@ -223,10 +223,13 @@ mod tests {
     fn catches_a_planted_string_in_a_tempdir() {
         let repo = TempRepo::new("planted");
         let planted = format!("db = \"{}{}\"", "supa", "base");
-        repo.write("crates/kp-core/src/lib.rs", &planted);
+        repo.write("crates/curator-core/src/lib.rs", &planted);
         let findings = scan(&repo.root).expect("scan");
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].path, PathBuf::from("crates/kp-core/src/lib.rs"));
+        assert_eq!(
+            findings[0].path,
+            PathBuf::from("crates/curator-core/src/lib.rs")
+        );
         assert_eq!(findings[0].line, 1);
         assert_eq!(findings[0].pattern, format!("{}{}", "supa", "base"));
     }
@@ -252,10 +255,13 @@ mod tests {
         let repo = TempRepo::new("docs");
         let word = format!("{}{}", "Obsi", "dian");
         repo.write("docs/design/notes.md", &format!("{word} is one viewer.\n"));
-        repo.write("crates/kp-core/src/lib.rs", &format!("// {word}\n"));
+        repo.write("crates/curator-core/src/lib.rs", &format!("// {word}\n"));
         let findings = scan(&repo.root).expect("scan");
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].path, PathBuf::from("crates/kp-core/src/lib.rs"));
+        assert_eq!(
+            findings[0].path,
+            PathBuf::from("crates/curator-core/src/lib.rs")
+        );
     }
 
     #[test]

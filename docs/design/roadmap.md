@@ -33,8 +33,8 @@ from commit one.
   genuinely calendar-critical deliverable, due before Curio freezes its contracts.
 - The four contract drafts: `kp-note/v1`, `kp-config/v1`, `proposals/v1`, MCP surface v1.
 - Fresh product repo scaffold: **Rust cargo workspace** — six library crates
-  (`kp-core`, `kp-ingest`, `kp-index`, `kp-zotero`, `kp-mcp`, `kp-librarian`) plus the
-  `kp` binary; justfile, hooks, `kp.example.toml`; the CI grep litmus (no
+  (`curator-core`, `curator-ingest`, `curator-index`, `curator-zotero`, `curator-mcp`, `curator-librarian`) plus the
+  `curator` binary; justfile, hooks, `curator.example.toml`; the CI grep litmus (no
   private-instance references in product code or contracts) enforced from commit one.
 - Curio draft schemas vendored as sha-pinned fixtures, labeled draft.
 - Zotero official `/fulltext` API verified against a real item **before** any WebDAV
@@ -52,14 +52,14 @@ the contracts and architecture docs.
 proposals — with the full safety model working **forge-free** (the OSS default) and
 forge-hardened (optional tier).
 
-- `kp-core`: `kp.toml` load/validate per `kp-config/v1` (env overrides, unknown keys
+- `curator-core`: `kp.toml` load/validate per `kp-config/v1` (env overrides, unknown keys
   warn), `kp-note/v1` frontmatter parse, atomic tmp+rename writes, dual hashing
   (contract body-checksum as opaque change token + internal full-file hash for
   reindex), `kp:<uuidv7>` identity minting, `.curio/manifest.json` ownership reader.
 - MCP surface v1 vault reads (`kp_get_note`, `kp_recent`) and `kp_propose` from the one
-  `kp-mcp` entrypoint — stdio default, streamable HTTP + bearer token optional.
-- Local disposal flow as the primary safety model: `kp propose` / `kp review` /
-  `kp apply` running **one importable deterministic validator** (schema, path
+  `curator-mcp` entrypoint — stdio default, streamable HTTP + bearer token optional.
+- Local disposal flow as the primary safety model: `curator propose` / `curator review` /
+  `curator apply` running **one importable deterministic validator** (schema, path
   allowlist, ownership-oracle refusal of `.curio/**` and managed regions,
   duplicate/absent-identity rejection, clean patch application). The same module runs
   as an optional forge CI hardening tier *(instance-side deployment of that tier)*.
@@ -68,7 +68,7 @@ forge-hardened (optional tier).
 **Exit:** an MCP client lists/reads/searches the vault; a proposal round-trips
 propose → validate → human apply on a laptop with **no git remote**; the validator
 fixture suite (ownership violations, duplicate identity, conflict markers) passes.
-**Size:** 2–3 weeks focused. **OSS state:** point `kp` at any markdown directory and
+**Size:** 2–3 weeks focused. **OSS state:** point `curator` at any markdown directory and
 get the vault MCP surface plus local propose/review/apply — zero forge, zero LLM,
 zero Zotero.
 
@@ -77,7 +77,7 @@ zero Zotero.
 **Goal:** a Zotero library flows into the vault as literature stubs with correct
 identity, deletion, and race handling.
 
-- `kp-zotero` metadata channel: Web API delta polling (`Last-Modified-Version`
+- `curator-zotero` metadata channel: Web API delta polling (`Last-Modified-Version`
   etiquette, backoff) into a disposable local cache; `/deleted?since` consumed each
   cycle — tombstones drop index rows and raise an orphaned-note **proposal**, never an
   auto-delete. Metadata-backend seam defined in config (Web API now; local-database
@@ -108,7 +108,7 @@ rebuild-not-migrate, entered only through a measured resource gate.
   embedding chunks/sec on the pinned model) on the reference host, with go/no-go
   thresholds; the named fallback is reduced cadence/scope, never new hardware
   *(instance-side measurement; the thresholds document the product's honest floor)*.
-- `kp-index`: one `index.db` — sqlite-vec vectors + FTS5 BM25 + relational edge tables
+- `curator-index`: one `index.db` — sqlite-vec vectors + FTS5 BM25 + relational edge tables
   (recursive CTEs for one-hop expansion, supports/refutes); WAL, multi-process-safe.
   Chunk-level content hashes so unchanged chunks skip re-embedding across rebuilds.
 - `Embedder` trait: **`builtin`** in-process pinned CPU ONNX model as default,
@@ -165,7 +165,7 @@ configuration on both sides. **Blocks on Curio shipping its contracts**; feeds C
 before that — the Phase 0 schema review and Phases 1–2 fixtures are what Curio's
 generic-consumer acceptance test demos against.
 
-- Curio adapter GA in `kp-ingest`: validates vanilla frontmatter against pinned
+- Curio adapter GA in `curator-ingest`: validates vanilla frontmatter against pinned
   released schemas (additive minors tolerated; major mismatch → index-side quarantine
   flag + alert, never a file move); maps `curio_id` → `kp_id: curio:<uuidv7>`;
   lifecycle stays index-side.
@@ -199,7 +199,7 @@ the full history.
   Zotero, Obsidian-as-viewer, generic producer); operations (backup, rebuild,
   upgrade-by-rebuild); reference (config, CLI, MCP tools); a tested-MCP-clients matrix
   replacing "any client works".
-- `examples/sample-vault` + a demo recipe; `kp init` vault starter; an example
+- `examples/sample-vault` + a demo recipe; `curator init` vault starter; an example
   RSS-to-`kp-note` script (no fetcher crate — "any conforming producer" *is* the
   integration answer).
 - CI: fast per-commit gate on the `hash` embedder; a weekly scheduled real end-to-end

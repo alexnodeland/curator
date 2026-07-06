@@ -1,0 +1,29 @@
+[package]
+name = "curator-librarian"
+description = "Knowledge Plane librarian: deterministic-first maintenance + digest loops; optional LLM harness adapter as a prose enhancer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+curator-core = { workspace = true }
+# The workspace dep pins default-features = false: the curator-cli binary
+# (not this library) decides whether the ONNX stack is compiled in.
+curator-index = { workspace = true }
+# The proposals APPLY validator consults the Curio ownership oracle
+# (`.curio/manifest.json`) and the managed-region parser — both live in
+# curator-ingest's adapter module (curator-librarian -> curator-ingest is a downward
+# edge; see the workspace dependency-direction note).
+curator-ingest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

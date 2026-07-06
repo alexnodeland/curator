@@ -33,6 +33,6 @@ tagged, gated snapshot.
 
 ## Not yet in scope (post-launch)
 
-crates.io publication order (kp-core → kp-index → … → kp-cli), binary
+crates.io publication order (curator-core → curator-index → … → curator-cli), binary
 artifacts, install scripts. When these land, this skill gets amended —
 until then a release is a tag.

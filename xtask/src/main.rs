@@ -15,7 +15,7 @@ Commands:
                          (defaults to the workspace root); nonzero exit on any hit
   coverage-gate <json>   enforce the region-coverage floor from a
                          `cargo llvm-cov report --json --summary-only` export
-                         (gated: kp-core, kp-index, kp-librarian >= 80%)";
+                         (gated: curator-core, curator-index, curator-librarian >= 80%)";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
