@@ -1,12 +1,14 @@
-# The gate suite — a step-for-step mirror of `just ci`, which is the
-# executable source of truth (run locally on every change; this file
-# has not yet executed on a hosted runner — the repo has no remote
-# until launch). Designed for a clean runner with nothing but Rust —
-# no webview, no model server, no database, no forge services. If a
-# step here needs an external service, the quickstart promise is
-# broken. NOTE: tests use no external network, but curator-zotero's
-# wiremock tests bind loopback sockets — a sandbox denying bind() will
-# fail them.
+# The gate suite — `just ci` is the executable source of truth (run
+# locally on every change): the `ci` job mirrors it step for step and
+# the `license-audit` job is its `deny` recipe via the official action;
+# only the secret scan is CI-side-only (it wants full git history).
+# Designed for a clean runner with nothing but Rust — no webview, no
+# model server, no database, no forge services. If a step here needs
+# an external service, the quickstart promise is broken. NOTE: tests
+# use no external network, but curator-zotero's wiremock tests bind
+# loopback sockets — a sandbox denying bind() will fail them. The REAL
+# model path is deliberately not here: e2e-real.yml owns it (weekly +
+# release-gating), keeping the per-commit gate hermetic and fast.
 name: ci
 
 on:
@@ -63,3 +65,28 @@ jobs:
           cargo llvm-cov report --summary-only
           cargo llvm-cov report --json --summary-only --output-path target/coverage.json
           cargo run -p xtask -- coverage-gate target/coverage.json
+
+  # `just deny`: the shipped dependency tree stays permissive-only —
+  # allow-list + the one scoped exception live in deny.toml.
+  license-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
+  # Full-history secret scan. Complements (never replaces) the standing
+  # rules: secrets enter via env only, config files carry none by
+  # contract.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
