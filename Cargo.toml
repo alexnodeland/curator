@@ -73,6 +73,9 @@ axum = { version = "0.8", default-features = false }
 ulid = "1"
 # Unified diffs for proposals/v1 `changes.patch` rendering.
 similar = "3"
+# xtask only: markdown -> HTML for the deterministic docs-site generator
+# (`xtask docs`). default-features = false keeps just the html renderer.
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
 # Dev-only.
 proptest = "1"
