@@ -50,6 +50,11 @@ jobs:
       - name: lean build check (no default features)
         run: cargo check -p curator-cli --no-default-features
 
+      # The docs site must render: dangling links and missing anchors
+      # fail here, not on Pages. (pages.yml owns the deploy.)
+      - name: docs site (deterministic static build)
+        run: cargo run -p xtask -- docs
+
       # Same instrumented run + gate as `just cov`: region coverage,
       # fail-under 80% on curator-core/curator-index/curator-librarian, report elsewhere.
       - name: coverage (region gate)
