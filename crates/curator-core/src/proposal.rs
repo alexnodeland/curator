@@ -10,6 +10,8 @@
 //! ride it. It never touches the target files — it validates the intent,
 //! renders the diff, and records the proposal for human review/`curator apply`.
 
+use std::sync::{LazyLock, Mutex};
+
 use serde::{Deserialize, Serialize};
 
 use crate::managed::{CURIO_FRONTMATTER_SCHEMA, managed_block};
@@ -19,6 +21,32 @@ use crate::vault::{Vault, VaultError};
 
 /// The `schema` value this crate implements.
 pub const PROPOSALS_SCHEMA: &str = "proposals/v1";
+
+/// Process-global monotonic ULID source for proposal ids.
+///
+/// `Ulid::new()` seeds the random component fresh each call, so two proposals
+/// minted in the same millisecond sort in *random* order — which silently
+/// breaks the `proposals list` = creation-order invariant this module
+/// documents and the store relies on. A shared [`ulid::Generator`] guarantees
+/// strictly increasing ids even within one millisecond (it increments the
+/// random component instead of re-rolling it).
+static PROPOSAL_ID_GEN: LazyLock<Mutex<ulid::Generator>> =
+    LazyLock::new(|| Mutex::new(ulid::Generator::new()));
+
+/// Mint a strictly-monotonic ULID for a new proposal.
+///
+/// Falls back to a fresh random ULID only on the (astronomically rare)
+/// same-millisecond random-component overflow — still a valid, sortable id,
+/// just not guaranteed greater than the previous one in that one tick.
+fn mint_proposal_id() -> String {
+    let mut generator = PROPOSAL_ID_GEN
+        .lock()
+        .expect("proposal id generator poisoned");
+    generator
+        .generate()
+        .unwrap_or_else(|_| ulid::Ulid::new())
+        .to_string()
+}
 
 /// `proposal.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -153,7 +181,7 @@ pub fn create_proposal(
 
     let proposal = Proposal {
         schema: PROPOSALS_SCHEMA.to_owned(),
-        id: ulid::Ulid::new().to_string(),
+        id: mint_proposal_id(),
         created: now_rfc3339_utc(),
         author: author.to_owned(),
         title: title.to_owned(),
@@ -558,7 +586,30 @@ mod tests {
         };
         let (a, b) = (mk(), mk());
         assert_ne!(a.id, b.id);
-        assert!(a.id <= b.id, "ULIDs sort by creation time");
+        // Strictly less: the monotonic generator guarantees ordering even when
+        // both proposals land in the same millisecond (the old `Ulid::new()`
+        // only gave `<=`, and flaked to `>` under same-ms collisions).
+        assert!(a.id < b.id, "ULIDs strictly increase by creation order");
+    }
+
+    #[test]
+    fn proposal_ids_are_strictly_monotonic_under_tight_loop() {
+        // Mint many ids as fast as possible — the whole point is to force
+        // same-millisecond collisions, which is exactly what broke the old
+        // random-seeded `Ulid::new()`. Every id must be strictly greater than
+        // its predecessor and lexicographically sortable (ULIDs sort as ASCII).
+        let ids: Vec<String> = (0..5_000).map(|_| mint_proposal_id()).collect();
+        for pair in ids.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "ids must strictly increase: {} !< {}",
+                pair[0],
+                pair[1]
+            );
+        }
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "mint order must equal sort order");
     }
 
     #[test]
