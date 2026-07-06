@@ -1,0 +1,56 @@
+# The docs site — built by the in-repo generator (`xtask docs`, see
+# xtask/src/docs.rs) and deployed to GitHub Pages via the official
+# actions/deploy-pages flow. The build is deterministic by design
+# (same sources -> byte-identical site), and this workflow PROVES it on
+# every deploy: build twice, diff -r, fail on any drift.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; let a running deploy finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: build the site
+        run: cargo run -p xtask -- docs
+
+      - name: determinism check (same sources -> same site)
+        run: |
+          mv target/site target/site-first
+          cargo run -p xtask -- docs
+          diff -r target/site-first target/site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

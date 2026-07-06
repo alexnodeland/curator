@@ -17,8 +17,9 @@ pre-release.
 | `crates/curator-mcp` | the one MCP entrypoint — MCP surface v1 |
 | `crates/curator-librarian` | deterministic zero-LLM digest baseline; LLM harness = optional prose enhancer |
 | `crates/curator-cli` | the `curator` binary |
-| `xtask/` | workspace automation — the grep litmus |
+| `xtask/` | workspace automation — the grep litmus, the coverage gate, the docs-site generator |
 | `docs/design/` | architecture + decisions (the verdict-driven design record) |
+| `docs/site/` | the public docs-site sources (markdown pages + `nav.json` + vendored assets); `just site` renders them deterministically into `target/site/`, `.github/workflows/pages.yml` deploys to GitHub Pages on push to main |
 
 Dependency direction is strictly downward:
 `curator-cli → {curator-ingest, curator-zotero, curator-mcp, curator-librarian} → curator-index → curator-core`,
@@ -43,8 +44,10 @@ ownership oracle + managed-region parser).
   any hit. Where deployment choices exist, they are seams (traits,
   config), never named instances.
 - **Justfile front door.** `just` lists everything: `setup`, `build`,
-  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `doc`, `cov`,
-  `ci`. Run `just ci` before pushing — it is exactly what CI runs.
+  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `doc`, `site`,
+  `cov`, `ci`. Run `just ci` before pushing — it is exactly what CI
+  runs. The docs site is a gate too: `just site` (in `ci`) fails on
+  dangling links, missing anchors, or a page without an H1.
 - **Coverage gate.** `just cov` (in `ci`) enforces region coverage >= 80%
   on curator-core, curator-index, curator-librarian (report-only elsewhere) via
   `xtask coverage-gate`. Under the floor = write the missing tests;
