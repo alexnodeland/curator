@@ -48,6 +48,15 @@ lint: fmt-check clippy litmus
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+# The docs site: render docs/site/ into the deterministic static site at
+# target/site/ (also a gate — dangling links and missing anchors fail)
+site:
+    cargo run -p xtask -- docs
+
+# Build the docs site and open it locally
+site-open: site
+    open target/site/index.html
+
 # Coverage: one instrumented hermetic test run, then the region gate —
 # fail-under 80% on curator-core/curator-index/curator-librarian, report-only elsewhere.
 # Requires cargo-llvm-cov (`just setup` installs it).
@@ -58,4 +67,4 @@ cov:
     cargo run -p xtask -- coverage-gate target/coverage.json
 
 # Everything CI runs, in CI's order
-ci: fmt-check clippy test doc litmus lean-check cov
+ci: fmt-check clippy test doc litmus lean-check site cov

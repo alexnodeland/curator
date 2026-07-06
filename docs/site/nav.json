@@ -1,0 +1,36 @@
+{
+  "sections": [
+    {
+      "title": "Start",
+      "pages": [
+        { "file": "index.md", "label": "Overview" },
+        { "file": "quickstart.md", "label": "Quickstart" },
+        { "file": "concepts.md", "label": "Concepts" }
+      ]
+    },
+    {
+      "title": "Integrations",
+      "pages": [
+        { "file": "integrations/curio.md", "label": "Curio" },
+        { "file": "integrations/zotero.md", "label": "Zotero" },
+        { "file": "integrations/obsidian.md", "label": "Obsidian as viewer" },
+        { "file": "integrations/producers.md", "label": "Write a producer" }
+      ]
+    },
+    {
+      "title": "Operations",
+      "pages": [
+        { "file": "operations.md", "label": "Operations" }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [
+        { "file": "reference/config.md", "label": "Configuration" },
+        { "file": "reference/cli.md", "label": "CLI" },
+        { "file": "reference/mcp.md", "label": "MCP tools" },
+        { "file": "reference/clients.md", "label": "Tested MCP clients" }
+      ]
+    }
+  ]
+}
