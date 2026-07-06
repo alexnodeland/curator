@@ -1,0 +1,96 @@
+# Curator — compose deployment, three profiles:
+#
+#   core       the MCP surface over streamable HTTP (+ bearer token)
+#   zotero     the Zotero sync loop, as a long-running service
+#   librarian  the deterministic digest, on an in-container schedule
+#
+#   cp examples/compose/.env.example .env       # then set the token(s)
+#   docker compose --profile core up -d
+#   docker compose --profile core --profile zotero --profile librarian up -d
+#
+# Contract of the shape:
+#   - config is a read-only bind mount (no secrets in it, by contract);
+#     the default points at examples/compose/curator.toml, which binds
+#     [mcp] to 0.0.0.0:8377 — required inside a container
+#   - the vault is a bind mount (CANONICAL — this is your data; the
+#     default ./vault is created empty on first up)
+#   - derived state (index.db + the one-time ~130 MB embedding model)
+#     lives in the named volume `curator-state`: disposable by design,
+#     `docker volume rm` + reingest regenerates everything
+#   - secrets enter ONLY via environment (.env / env_file / host env):
+#     CURATOR_MCP_TOKEN (required by core), CURATOR_ZOTERO_KEY (zotero)
+#
+# One-shot instead of a loop (e.g. host cron drives the schedule) —
+# override the loop entrypoint with the binary:
+#   docker compose run --rm --entrypoint curator zotero zotero sync --config /work/curator.toml
+#   docker compose run --rm --entrypoint curator librarian digest run --config /work/curator.toml
+# Ad-hoc CLI against the same config/state (mcp's entrypoint IS curator):
+#   docker compose run --rm mcp ingest --config /work/curator.toml
+#   docker compose run --rm mcp doctor --config /work/curator.toml
+
+name: curator
+
+x-curator: &curator
+  build: .
+  image: curator:latest
+  env_file:
+    - path: ./.env
+      required: false
+  volumes:
+    - ${CURATOR_CONFIG_FILE:-./examples/compose/curator.toml}:/work/curator.toml:ro
+    - ${CURATOR_VAULT:-./vault}:/work/vault
+    - curator-state:/work/state
+  environment:
+    RUST_LOG: ${RUST_LOG:-warn}
+
+services:
+  mcp:
+    <<: *curator
+    profiles: [core]
+    command: ["mcp", "serve", "--http", "--config", "/work/curator.toml"]
+    ports:
+      - "${CURATOR_MCP_PORT:-8377}:8377"
+    restart: unless-stopped
+    # No unauthenticated network mode: the server refuses to start when
+    # CURATOR_MCP_TOKEN is unset (an MCP-contract rule, not a default).
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8377"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  zotero:
+    <<: *curator
+    profiles: [zotero]
+    # The sync loop as a service. Interval via CURATOR_SYNC_INTERVAL
+    # (seconds, default hourly); a failed pass logs and retries next
+    # interval rather than crash-looping the container.
+    entrypoint: ["/bin/bash", "-euc"]
+    command:
+      - |
+        while true; do
+          curator zotero sync --config /work/curator.toml \
+            || echo "zotero sync failed; retrying in ${CURATOR_SYNC_INTERVAL:-3600}s" >&2
+          sleep "${CURATOR_SYNC_INTERVAL:-3600}"
+        done
+    restart: unless-stopped
+
+  librarian:
+    <<: *curator
+    profiles: [librarian]
+    # The deterministic digest on a daily loop (CURATOR_DIGEST_INTERVAL
+    # seconds). Digests are proposals: they wait for human review unless
+    # you opt into the auto-apply gate with CURATOR_DIGEST_ARGS=--auto.
+    entrypoint: ["/bin/bash", "-euc"]
+    command:
+      - |
+        while true; do
+          curator digest run --config /work/curator.toml ${CURATOR_DIGEST_ARGS:-} \
+            || echo "digest failed; retrying in ${CURATOR_DIGEST_INTERVAL:-86400}s" >&2
+          sleep "${CURATOR_DIGEST_INTERVAL:-86400}"
+        done
+    restart: unless-stopped
+
+volumes:
+  curator-state:

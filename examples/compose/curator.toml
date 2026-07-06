@@ -1,0 +1,42 @@
+# Curator configuration for the CONTAINER deployment (kp-config/v1) —
+# the file compose.yaml mounts read-only at /work/curator.toml.
+# Copy + edit for your own deployment; secrets stay in env, never here.
+#
+# Differences from curator.example.toml, all container-shaped:
+#   - vault/index paths are the container mount points
+#   - [mcp] serves streamable HTTP on 0.0.0.0 (the shipped default
+#     binds loopback, which is unreachable from outside a container)
+#   - env var names use the preferred CURATOR_* spellings
+
+schema = "kp-config/v1"
+
+[vault]
+path = "/work/vault"             # bind mount (see compose.yaml)
+proposals_dir = ".kp/proposals"  # relative to vault
+
+[index]
+path = "/work/state/index.db"    # named volume: derived, disposable
+embedder = "builtin"             # first ingest fetches the pinned model
+                                 # (~130 MB, one-time) into /work/state/models
+chunk_tokens = 512
+chunk_overlap = 64
+
+[curio]
+enabled = false
+
+[zotero]
+enabled = false                  # flip on + set user_id for the zotero profile
+api_base = "https://api.zotero.org"
+user_id = ""
+api_key_env = "CURATOR_ZOTERO_KEY"
+
+[librarian]
+now_path = "now.md"
+digest_dir = "digests"
+half_life_days = 14
+top_k = 12
+
+[mcp]
+transport = "http"
+http_bind = "0.0.0.0:8377"       # container-internal; compose maps the port
+bearer_token_env = "CURATOR_MCP_TOKEN"
