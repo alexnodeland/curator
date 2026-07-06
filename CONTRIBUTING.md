@@ -15,7 +15,7 @@ this document exists so the workflow is public from day one.
   fixtures.
 - **Gates are the review.** `just ci` (fmt, clippy with warnings denied,
   tests, rustdoc with warnings denied, the grep litmus, and the coverage
-  gate — region coverage >= 80% on kp-core/kp-index/kp-librarian) must be
+  gate — region coverage >= 80% on curator-core/curator-index/curator-librarian) must be
   green before any commit is proposed. Pre-commit hooks enforce the fast
   half locally: `just setup` once (it also installs `cargo-llvm-cov`).
   A failing coverage gate means missing tests — never exclusions.
@@ -25,9 +25,9 @@ this document exists so the workflow is public from day one.
   deployment: no private hostnames, LAN addresses, or internal service
   names anywhere. `just litmus` fails the build on a hit.
 - **Rust.** Workspace lints apply: `unsafe_code = "forbid"` everywhere
-  except kp-index, which scopes it to `deny` for exactly one documented
+  except curator-index, which scopes it to `deny` for exactly one documented
   `#[allow]` site (sqlite-vec's `sqlite3_auto_extension` FFI
-  registration — see `crates/kp-index/src/db.rs`);
+  registration — see `crates/curator-index/src/db.rs`);
   `cargo fmt` formatting is canonical.
 
 ## Workflow

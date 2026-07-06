@@ -2,8 +2,8 @@
 //!
 //! Consumes a `cargo llvm-cov` JSON export (`llvm.coverage.json.export`)
 //! and enforces a minimum REGION coverage on the crates where thin tests
-//! would silently rot the contracts: `kp-core`, `kp-index`,
-//! `kp-librarian`. Every other crate is reported but never gated — the
+//! would silently rot the contracts: `curator-core`, `curator-index`,
+//! `curator-librarian`. Every other crate is reported but never gated — the
 //! CLI and transport shells earn their coverage through the e2e suites at
 //! whatever level honesty produces.
 //!
@@ -19,7 +19,7 @@ use std::process::ExitCode;
 const FAIL_UNDER_REGIONS: f64 = 80.0;
 
 /// Crates the floor applies to. Everything else is report-only.
-const GATED_CRATES: [&str; 3] = ["kp-core", "kp-index", "kp-librarian"];
+const GATED_CRATES: [&str; 3] = ["curator-core", "curator-index", "curator-librarian"];
 
 /// Regions summed per crate.
 #[derive(Debug, Default, Clone, Copy)]
@@ -194,9 +194,9 @@ mod tests {
     /// Enough data for every gated crate to pass.
     fn all_green() -> Vec<(&'static str, u64, u64)> {
         vec![
-            ("kp-core/src/a.rs", 100, 95),
-            ("kp-index/src/b.rs", 100, 90),
-            ("kp-librarian/src/c.rs", 100, 85),
+            ("curator-core/src/a.rs", 100, 95),
+            ("curator-index/src/b.rs", 100, 90),
+            ("curator-librarian/src/c.rs", 100, 85),
         ]
     }
 
@@ -209,18 +209,18 @@ mod tests {
     #[test]
     fn fails_a_gated_crate_under_the_floor() {
         let mut files = all_green();
-        files.push(("kp-core/src/cold.rs", 100, 0)); // drags kp-core to 47.5%
+        files.push(("curator-core/src/cold.rs", 100, 0)); // drags curator-core to 47.5%
         let report = evaluate(&export(&files)).expect("evaluates");
         assert_eq!(report.failures.len(), 1);
-        assert!(report.failures[0].contains("kp-core"), "{report}");
+        assert!(report.failures[0].contains("curator-core"), "{report}");
     }
 
     #[test]
     fn files_of_one_crate_are_summed_not_gated_individually() {
         let mut files = all_green();
         // 0%-covered file, but the crate stays at 500/600 = 83%.
-        files.push(("kp-index/src/opt_in.rs", 100, 0));
-        files.push(("kp-index/src/hot.rs", 400, 400));
+        files.push(("curator-index/src/opt_in.rs", 100, 0));
+        files.push(("curator-index/src/hot.rs", 400, 400));
         let report = evaluate(&export(&files)).expect("evaluates");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
     }
@@ -228,21 +228,21 @@ mod tests {
     #[test]
     fn ungated_crates_report_but_never_fail() {
         let mut files = all_green();
-        files.push(("kp-cli/src/main.rs", 1000, 1)); // 0.1%
+        files.push(("curator-cli/src/main.rs", 1000, 1)); // 0.1%
         let report = evaluate(&export(&files)).expect("evaluates");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
-        assert!(report.per_crate.contains_key("kp-cli"));
+        assert!(report.per_crate.contains_key("curator-cli"));
     }
 
     #[test]
     fn a_gated_crate_missing_from_the_export_fails_loudly() {
         let files: Vec<_> = all_green()
             .into_iter()
-            .filter(|(n, _, _)| !n.starts_with("kp-librarian"))
+            .filter(|(n, _, _)| !n.starts_with("curator-librarian"))
             .collect();
         let report = evaluate(&export(&files)).expect("evaluates");
         assert_eq!(report.failures.len(), 1);
-        assert!(report.failures[0].contains("kp-librarian"));
+        assert!(report.failures[0].contains("curator-librarian"));
     }
 
     #[test]
@@ -271,7 +271,10 @@ mod tests {
 
     #[test]
     fn crate_of_maps_paths() {
-        assert_eq!(crate_of("/w/crates/kp-core/src/id.rs"), Some("kp-core"));
+        assert_eq!(
+            crate_of("/w/crates/curator-core/src/id.rs"),
+            Some("curator-core")
+        );
         assert_eq!(crate_of("/w/xtask/src/main.rs"), Some("xtask"));
         assert_eq!(crate_of("/registry/serde/src/lib.rs"), None);
     }

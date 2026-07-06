@@ -1,4 +1,4 @@
-# Knowledge Plane — the command front door. `just` lists recipes.
+# Curator — the command front door. `just` lists recipes.
 
 # List available recipes
 default:
@@ -14,7 +14,7 @@ setup:
 build:
     cargo build --workspace
 
-# Run the full hermetic test suite: no external network (kp-zotero's
+# Run the full hermetic test suite: no external network (curator-zotero's
 # wiremock tests bind loopback sockets only), no model downloads, no
 # services
 test:
@@ -36,20 +36,20 @@ clippy:
 litmus:
     cargo run -p xtask -- litmus
 
-# The lean build stays buildable: `kp` without the ONNX embedder stack
+# The lean build stays buildable: `curator` without the ONNX embedder stack
 # (no build-time ort download, no run-time model fetch)
 lean-check:
-    cargo check -p kp-cli --no-default-features
+    cargo check -p curator-cli --no-default-features
 
 # fmt-check + clippy + litmus
 lint: fmt-check clippy litmus
 
-# API docs, warnings are errors (kp-core also gates missing_docs)
+# API docs, warnings are errors (curator-core also gates missing_docs)
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 # Coverage: one instrumented hermetic test run, then the region gate —
-# fail-under 80% on kp-core/kp-index/kp-librarian, report-only elsewhere.
+# fail-under 80% on curator-core/curator-index/curator-librarian, report-only elsewhere.
 # Requires cargo-llvm-cov (`just setup` installs it).
 cov:
     cargo llvm-cov --workspace --no-report

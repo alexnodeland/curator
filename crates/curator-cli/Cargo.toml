@@ -1,0 +1,37 @@
+[package]
+name = "curator-cli"
+description = "Curator (`curator`) — the Knowledge Plane CLI: init, ingest, reindex, search, mcp, propose/review/apply, digest, status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "curator"
+path = "src/main.rs"
+
+[dependencies]
+curator-core = { workspace = true }
+curator-index = { workspace = true }
+curator-ingest = { workspace = true }
+curator-zotero = { workspace = true }
+curator-mcp = { workspace = true }
+curator-librarian = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# `curator mcp serve` drives the async transports from a sync main.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+
+[features]
+# The pinned in-process ONNX embedder (`embedder = "builtin"`), on by
+# default. `cargo build -p curator-cli --no-default-features` produces a lean
+# hash-only `curator` with zero build-time or run-time downloads.
+default = ["embed-onnx"]
+embed-onnx = ["curator-index/embed-onnx"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

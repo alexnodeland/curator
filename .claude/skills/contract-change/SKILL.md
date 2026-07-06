@@ -25,13 +25,13 @@ versa. Every contract change follows this order — spec first, code last.
    `proposals`) — keep `$id` version-suffixed.
 3. Add a dated entry to that contract's `CHANGELOG.md` saying what
    changed and why.
-4. If the change affects `kp-config`, update `kp.example.toml` — the
-   kp-core test pins the example to the model, so they must move together.
+4. If the change affects `kp-config`, update `curator.example.toml` — the
+   curator-core test pins the example to the model, so they must move together.
 
 ## 3. Conform the code (follow-up commits)
 
-Update `kp-core` types and any downstream crate. Tests that encode the
-contract examples (kp-core has one per contract) must be updated to the
+Update `curator-core` types and any downstream crate. Tests that encode the
+contract examples (curator-core has one per contract) must be updated to the
 new spec text — copy from the spec, do not invent.
 
 ## 4. Gate

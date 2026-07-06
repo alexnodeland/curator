@@ -458,6 +458,125 @@ dependencies = [
 ]
 
 [[package]]
+name = "curator-cli"
+version = "0.1.0"
+dependencies = [
+ "curator-core",
+ "curator-index",
+ "curator-ingest",
+ "curator-librarian",
+ "curator-mcp",
+ "curator-zotero",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "curator-core"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "proptest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "similar",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "curator-index"
+version = "0.1.0"
+dependencies = [
+ "curator-core",
+ "fastembed",
+ "rusqlite",
+ "serde_json",
+ "sqlite-vec",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "curator-ingest"
+version = "0.1.0"
+dependencies = [
+ "curator-core",
+ "curator-index",
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "curator-librarian"
+version = "0.1.0"
+dependencies = [
+ "curator-core",
+ "curator-index",
+ "curator-ingest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "curator-mcp"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "curator-core",
+ "curator-index",
+ "http-body-util",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "curator-zotero"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "curator-core",
+ "curator-index",
+ "quick-xml",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "temp-env",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wiremock",
+ "zip",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1484,125 +1603,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b7fc96cd6677cc81b00607d43477327d719419937ef1c44b3556a40f517d54c"
 dependencies = [
  "regex-syntax",
-]
-
-[[package]]
-name = "kp-cli"
-version = "0.1.0"
-dependencies = [
- "kp-core",
- "kp-index",
- "kp-ingest",
- "kp-librarian",
- "kp-mcp",
- "kp-zotero",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "kp-core"
-version = "0.1.0"
-dependencies = [
- "jsonschema",
- "proptest",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "similar",
- "tempfile",
- "thiserror",
- "toml",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "kp-index"
-version = "0.1.0"
-dependencies = [
- "fastembed",
- "kp-core",
- "rusqlite",
- "serde_json",
- "sqlite-vec",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "kp-ingest"
-version = "0.1.0"
-dependencies = [
- "jsonschema",
- "kp-core",
- "kp-index",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "kp-librarian"
-version = "0.1.0"
-dependencies = [
- "kp-core",
- "kp-index",
- "kp-ingest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "kp-mcp"
-version = "0.1.0"
-dependencies = [
- "axum",
- "http-body-util",
- "kp-core",
- "kp-index",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "tokio",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "kp-zotero"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "kp-core",
- "kp-index",
- "quick-xml",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "temp-env",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "wiremock",
- "zip",
 ]
 
 [[package]]

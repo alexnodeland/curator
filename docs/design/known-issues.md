@@ -36,26 +36,26 @@ known namespace, so hand-written notes with e.g. `kp_id: "kp:aaa"`
 ingest, index, and round-trip unchallenged.
 
 **Why accepted:** deliberate Postel split — the schema is normative for
-*producers* (Curio, kp-zotero, and the digest writer all emit
-schema-conformant ids, exercised by kp-core's conformance tests and the
+*producers* (Curio, curator-zotero, and the digest writer all emit
+schema-conformant ids, exercised by curator-core's conformance tests and the
 librarian's uuid7 auto-apply gate), while the plane stays liberal in
 what it *accepts* so a human's hand-minted note is never silently
 dropped from search. Identity is an opaque key everywhere index-side;
 a non-conforming id degrades nothing but the producer's own hygiene.
 
 **Would close it:** shape validation at parse with a warn-not-reject
-path in ingest, once there is a `kp doctor` rule to surface offenders
+path in ingest, once there is a `curator doctor` rule to surface offenders
 first (rejecting outright would evict existing notes from the index on
 upgrade — worse than the disease).
 
-## 3. `kp propose` has no staged-changes mode
+## 3. `curator propose` has no staged-changes mode
 
 The build spec's CLI line reads "create from staged changes or
 generated content"; only the generated-content mode (`--from <dir>`)
 exists. `contracts/proposals/v1.md` was amended to promise exactly what
 ships and to name the staged-changes mode as planned work.
 
-**Would close it:** a `kp propose --staged` that diffs working-tree
+**Would close it:** a `curator propose --staged` that diffs working-tree
 edits (vault under git) into a proposal. Needs a decision on how a
 proposal-of-my-own-edits interacts with the apply validator's
 clean-apply rule (the tree already contains the change).
@@ -67,7 +67,7 @@ Fixed for flags (`starred`/`read_later` are guarded by event ts — see
 older-dated event file materializes after its events' dedupe rows were
 pruned by the retention horizon, its `article.opened` events fold
 again. Bounded by producer retention (≥90 days) and only reachable via
-backfill/restore of pre-horizon files; a `kp reindex` no longer resets
+backfill/restore of pre-horizon files; a `curator reindex` no longer resets
 dedupe state (consumer state carries across epochs), which removes the
 common trigger.
 
