@@ -84,3 +84,22 @@ unexercised. The workflow header says so.
 
 **Would close it:** first push to a forge with Actions enabled; treat
 the first green run as part of launch acceptance.
+
+## 6. Contract specs still use the pre-rename spellings (`kp`, `kp.example.toml`)
+
+The product renamed kp → curator (crates, binary, config discovery, env
+aliases), but the four published contract documents under `contracts/`
+are frozen byte-for-byte: the sibling producer repo vendors them
+sha-pinned, and published v1 text is never edited casually. So
+`contracts/kp-config/v1.md` still links `kp.example.toml` (now
+`curator.example.toml` — that relative link is stale) and the CLI tables
+in `contracts/proposals/v1.md` / `contracts/mcp/v1.md` still say `kp
+propose`, `kp mcp`, etc. Every normative surface is unaffected: schema
+IDs (`kp-note/v1`, `kp-config/v1`, `proposals/v1`), the six `kp_*` tool
+names, document shapes, the `KP_*` env var names (still honored, with
+`CURATOR_*` preferred aliases), and the managed-region markers are
+unchanged and still served exactly as published.
+
+**Would close it:** an editorial minor via the contract-change skill —
+refresh prose/links and add a CHANGELOG entry per contract — coordinated
+with the sibling repo's vendored-sha bump in the same change set.
