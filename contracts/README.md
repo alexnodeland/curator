@@ -8,7 +8,7 @@ internal and may change freely.
 | contract | governs | spec |
 |---|---|---|
 | `kp-note/v1` | note identity + enrichment frontmatter | [kp-note/v1.md](kp-note/v1.md) · [JSON Schema](kp-note/v1.schema.json) |
-| `kp-config/v1` | `kp.toml` configuration | [kp-config/v1.md](kp-config/v1.md) |
+| `kp-config/v1` | `curator.toml` configuration (legacy name `kp.toml`) | [kp-config/v1.md](kp-config/v1.md) · [JSON Schema](kp-config/v1.schema.json) |
 | `proposals/v1` | the only agent write path | [proposals/v1.md](proposals/v1.md) · [JSON Schema](proposals/v1.schema.json) |
 | MCP surface v1 | the agent tool surface | [mcp/v1.md](mcp/v1.md) |
 

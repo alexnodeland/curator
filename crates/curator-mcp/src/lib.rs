@@ -63,4 +63,19 @@ mod tests {
             "contracts/mcp/v1.md tool table drifted from TOOLS_V1 (order is part of the doc)"
         );
     }
+
+    /// The published docs SITE reference page must describe every served tool
+    /// — a stranger reads this page, not the code. Closes the docs-site half
+    /// of the page↔code drift gap (the contract page is covered above).
+    #[test]
+    fn the_docs_site_mcp_page_documents_every_tool() {
+        let page = include_str!("../../../docs/site/src/reference/mcp.md");
+        for tool in TOOLS_V1 {
+            assert!(
+                page.contains(tool),
+                "docs/site/src/reference/mcp.md never mentions `{tool}` — the reference \
+                 page drifted from the served tool surface (TOOLS_V1)"
+            );
+        }
+    }
 }
