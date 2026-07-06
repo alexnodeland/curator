@@ -52,6 +52,15 @@ design record.)
 For development: `just` lists the front door (`just ci` = exactly what CI
 runs).
 
+## Documentation
+
+The docs site — quickstart, concepts, integrations, operations, and the
+full config/CLI/MCP reference — is generated deterministically from
+[`docs/site/`](docs/site/) by the in-repo generator (`just site`,
+implemented in `xtask/src/docs.rs`) and deployed to GitHub Pages on
+every push to `main` (`.github/workflows/pages.yml`). Build it locally
+into `target/site/` with `just site-open`.
+
 ## The four contracts
 
 Everything that crosses the system boundary is one of four published
