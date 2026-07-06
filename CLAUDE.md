@@ -64,5 +64,6 @@ ownership oracle + managed-region parser).
 - **Conventional Commits** on `main` (commit-msg hook enforces).
   Workspace lints: `unsafe_code = "forbid"` (relax only if sqlite-vec FFI
   registration truly requires it, with a comment at the site).
-- **License is deliberately TBD** — do not add a LICENSE file or a
-  `license` field; that decision is the maintainer's alone.
+- **License is [MIT](LICENSE)** (maintainer's decision, 2026) — the
+  top-level `LICENSE` + `license = "MIT"` workspace metadata cover the tree;
+  no per-file headers.
