@@ -9,3 +9,8 @@ target/
 
 # Knowledge Plane local state (proposals staging, cursors)
 .kp/
+
+# Compose deployment: local secrets + the default vault bind mount
+# (examples/compose/.env.example is the committed template)
+.env
+/vault/

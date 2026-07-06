@@ -1,0 +1,10 @@
+# Keep the build context to sources: the builder stage compiles from
+# scratch; local build output and VCS state would only bloat and bust
+# the layer cache.
+.git
+target
+.kp
+docs/site
+examples/sample-vault
+*.md
+!README.md
