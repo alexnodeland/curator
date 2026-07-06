@@ -186,3 +186,42 @@ curator doctor --json   # same checks, machine-readable — feed your monitoring
 `doctor` exits nonzero when any check errors, so it slots directly into
 a healthcheck. Logs go to stderr (`RUST_LOG` overrides the default
 `warn` level) — journald catches them as-is.
+
+## Containers
+
+The same three decisions, container-shaped: the repo ships a
+multi-stage `Dockerfile` (pinned Rust builder → slim Debian runtime,
+~50 MB image, non-root) and a `compose.yaml` with one profile per
+concern:
+
+| profile | service | runs |
+|---|---|---|
+| `core` | `mcp` | `curator mcp serve --http` (streamable HTTP + bearer) |
+| `zotero` | `zotero` | the Zotero sync loop (interval-tunable) |
+| `librarian` | `librarian` | `curator digest run` on a daily loop |
+
+```sh
+cp examples/compose/.env.example .env    # set CURATOR_MCP_TOKEN (+ Zotero key)
+docker compose --profile core up -d
+docker compose --profile core --profile zotero --profile librarian up -d
+```
+
+The mount layout mirrors the canonical/derived split exactly:
+
+- **config** — `examples/compose/curator.toml` (or your copy), mounted
+  read-only at `/work/curator.toml`. It binds `[mcp]` to
+  `0.0.0.0:8377`, which a container needs and the shipped default
+  (loopback) deliberately is not.
+- **the vault** — a bind mount at `/work/vault`: your data, on your
+  disk, in your backups. The container adds nothing canonical.
+- **derived state** — the `curator-state` named volume at
+  `/work/state`: `index.db` plus the one-time model download.
+  `docker volume rm` + reingest regenerates all of it, by design.
+- **secrets** — env only (`.env` or the host environment):
+  `CURATOR_MCP_TOKEN`, `CURATOR_ZOTERO_KEY`. Nothing in the image,
+  nothing in the config, by contract.
+
+One-shots instead of loops (host cron, CI, a systemd timer on the
+host): every service is the same image and binary —
+`docker compose run --rm mcp ingest --config /work/curator.toml`, and
+the loop services take `--entrypoint curator` to run a single pass.

@@ -1,7 +1,8 @@
 # Curator
 
-> **Status: pre-release.** Contracts v1, APIs settling.
-> Not yet packaged or published. **License: TBD — private until launch.**
+> **Status: pre-release.** Contracts v1, APIs settling. Installs from
+> source (crates.io publication is a staged follow-up).
+> **License: TBD — private until launch.**
 
 Curator is the knowledge plane under your personal knowledge system:
 **any plain-markdown vault** + **one index database** + **MCP for
@@ -21,26 +22,52 @@ agents** + **a deterministic librarian**.
   new against your current interests — zero LLM required; an agent
   harness is an optional prose enhancer.
 
+## Install
+
+The primary install is Cargo, straight from the source tree:
+
+```sh
+git clone https://github.com/alexnodeland/curator && cd curator
+cargo install --locked --path crates/curator-cli
+curator --version
+```
+
+(equivalently, without a checkout:
+`cargo install --locked --git https://github.com/alexnodeland/curator curator-cli`)
+
+Other channels:
+
+- **Release binaries** — every `v*` tag builds `curator` for linux
+  x86_64 + macOS arm64 with `SHA256SUMS` into a *draft* GitHub release
+  (`.github/workflows/release.yml`); a human reviews and publishes.
+- **Containers** — [`Dockerfile`](Dockerfile) (multi-stage, slim
+  runtime) + [`compose.yaml`](compose.yaml) with profiles
+  `core` (MCP over HTTP) | `zotero` (sync loop) | `librarian`
+  (scheduled digests). Config + vault are bind mounts; secrets enter
+  via env only.
+- **crates.io** — staged follow-up, deliberately not published while
+  pre-release.
+
 ## Quickstart
 
 No model server, no database service, no daemon — one binary, one
-SQLite file:
+SQLite file. Try the whole loop on the bundled sample vault first —
+offline, deterministic, non-interactive:
 
 ```sh
-git clone <this-repo> && cd curator
-cargo build --workspace
-cargo run -p curator-cli -- --help     # the `curator` binary
+just demo      # scratch-dir init → ingest → search → digest walk-through
 ```
 
 **Two downloads to know about up front.** The default build compiles the
-in-process ONNX embedder: `cargo build` fetches ONNX Runtime binaries
-(via the `ort` download feature) at build time, and the first command
-that embeds (e.g. default-config `curator init` / `curator ingest`) fetches the
-pinned ~130 MB embedding model from Hugging Face into `.kp/models/`
-(one-time, announced with a progress bar). For a fully-offline or lean
-setup: set `embedder = "hash"` in `curator.toml` (deterministic, no ML), or
-build with `cargo build -p curator-cli --no-default-features` — that binary
-has no ONNX stack and performs zero downloads at build or run time.
+in-process ONNX embedder: `cargo build`/`cargo install` fetches ONNX
+Runtime binaries (via the `ort` download feature) at build time, and the
+first command that embeds (e.g. default-config `curator init` / `curator
+ingest`) fetches the pinned ~130 MB embedding model from Hugging Face
+into `.kp/models/` (one-time, announced with a progress bar). For a
+fully-offline or lean setup: set `embedder = "hash"` in `curator.toml`
+(deterministic, no ML), or build with `cargo build -p curator-cli
+--no-default-features` — that binary has no ONNX stack and performs zero
+downloads at build or run time.
 
 Copy [`curator.example.toml`](curator.example.toml) to `curator.toml`
 (the legacy `kp.toml` name is still accepted) and point `[vault].path` at

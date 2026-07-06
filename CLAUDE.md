@@ -18,8 +18,11 @@ pre-release.
 | `crates/curator-librarian` | deterministic zero-LLM digest baseline; LLM harness = optional prose enhancer |
 | `crates/curator-cli` | the `curator` binary |
 | `xtask/` | workspace automation — the grep litmus, the coverage gate, the docs-site generator |
+| `examples/` | the integration story, runnable: `sample-vault/` (12 notes, used by `just demo` + `just e2e-real`), `rss-to-notes.sh` (a complete shell producer), `compose/` (container config + env template) |
 | `docs/design/` | architecture + decisions (the verdict-driven design record) |
 | `docs/site/` | the public docs-site sources (markdown pages + `nav.json` + vendored assets); `just site` renders them deterministically into `target/site/`, `.github/workflows/pages.yml` deploys to GitHub Pages on push to main |
+| `Dockerfile`, `compose.yaml` | the container deployment: multi-stage build → slim non-root runtime; compose profiles `core` \| `zotero` \| `librarian` (config+vault bind mounts, state volume, secrets env-only) |
+| `deny.toml` | the license audit config (`just deny`): permissive-only allow-list, one scoped MPL-2.0 exception (`option-ext`) |
 
 Dependency direction is strictly downward:
 `curator-cli → {curator-ingest, curator-zotero, curator-mcp, curator-librarian} → curator-index → curator-core`,
@@ -36,7 +39,10 @@ ownership oracle + managed-region parser).
 - **Hermetic tests.** No network, no model downloads, no external
   services — the deterministic `hash` embedder backs ALL embedding tests.
   CI runs on a clean runner with nothing but Rust; a test that needs a
-  service is a bug.
+  service is a bug. The ONE deliberate exception lives outside the
+  suite: `.github/workflows/e2e-real.yml` runs `just e2e-real` (real
+  ONNX model, cached) weekly and as the release blocker — never
+  per-commit.
 - **Litmus doctrine.** This is a public product repo: zero references to
   any private reference-deployment — no LAN prefixes, no internal service
   names, no host topology. `just litmus` (also in CI and self-tested in
@@ -44,10 +50,13 @@ ownership oracle + managed-region parser).
   any hit. Where deployment choices exist, they are seams (traits,
   config), never named instances.
 - **Justfile front door.** `just` lists everything: `setup`, `build`,
-  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `doc`, `site`,
-  `cov`, `ci`. Run `just ci` before pushing — it is exactly what CI
-  runs. The docs site is a gate too: `just site` (in `ci`) fails on
-  dangling links, missing anchors, or a page without an H1.
+  `test`, `fmt`/`fmt-check`, `clippy`, `litmus`, `lint`, `deny`, `doc`,
+  `site`, `cov`, `ci`, plus `demo` (offline sample-vault walk-through)
+  and `e2e-real` (real-model loop; weekly + release-gating in CI). Run
+  `just ci` before pushing — it is exactly what CI's gate jobs run
+  (only the gitleaks secret scan is CI-side-only). The docs site is a
+  gate too: `just site` (in `ci`) fails on dangling links, missing
+  anchors, or a page without an H1.
 - **Coverage gate.** `just cov` (in `ci`) enforces region coverage >= 80%
   on curator-core, curator-index, curator-librarian (report-only elsewhere) via
   `xtask coverage-gate`. Under the floor = write the missing tests;
