@@ -1,0 +1,8 @@
+# gitleaks false-positive allowlist (fingerprint = commit:path:rule:line).
+#
+# A test-fixture string in the config round-trip tests — `"future_key"` paired
+# with `vault.from_v2` — trips the generic-api-key rule. It is not a secret:
+# it is a literal in a unit test proving forward-compatible config parsing.
+# The path is the pre-rename `kp-core` because the finding lives in that
+# historical commit (the crate is `curator-core` on the current tree).
+f57dc7f3d1b34e0e0172c866d18a40530022c972:crates/kp-core/src/config.rs:generic-api-key:390
