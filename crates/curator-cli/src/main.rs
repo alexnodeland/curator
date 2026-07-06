@@ -35,7 +35,7 @@ const USAGE: &str = "curator — the Knowledge Plane
 Usage: curator <command> [args]
 
 Commands:
-  init [dir]      scaffold a vault: kp.toml (from the example), .kp/, first index
+  init [dir]      scaffold a vault: curator.toml (from the example), .kp/, first index
   ingest          run producer adapters (Curio, web clips) into the vault/index
   index rebuild   rebuild index.db (blue/green epoch swap)
   reindex         alias for `index rebuild`
@@ -54,7 +54,8 @@ Commands:
   status          vault + index + proposals overview
 
 Options (ingest / index rebuild / zotero sync):
-  --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
+  --config <path>  config location (default: $CURATOR_CONFIG or $KP_CONFIG,
+                   then ./curator.toml, ./kp.toml)
   --json           machine-readable summary on stdout
 
 Options (zotero sync):
@@ -63,7 +64,8 @@ Options (zotero sync):
   --fulltext-cap <n>    fulltext truncation cap, characters (default: 20000)
 
 Options (search / get / related / recent):
-  --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
+  --config <path>  config location (default: $CURATOR_CONFIG or $KP_CONFIG,
+                   then ./curator.toml, ./kp.toml)
   --json           print the MCP-shaped JSON output
   --k <n>          result count (search, related; default 10)
   --mode <m>       search mode: hybrid | vector | fts (default hybrid)
@@ -71,7 +73,8 @@ Options (search / get / related / recent):
   --kind <ns>      identity-namespace filter: curio | zotero | kp | path
 
 Options (mcp serve):
-  --config <path>  kp.toml location (default: $KP_CONFIG, then ./kp.toml)
+  --config <path>  config location (default: $CURATOR_CONFIG or $KP_CONFIG,
+                   then ./curator.toml, ./kp.toml)
   --http           streamable HTTP on [mcp].http_bind — REQUIRES the bearer
                    token env named by [mcp].bearer_token_env
 
@@ -88,7 +91,7 @@ Options (propose):
                    same vault-relative path (required)
 
 Options (init):
-  --embedder <e>   builtin | hash — stamped into the scaffolded kp.toml.
+  --embedder <e>   builtin | hash — stamped into the scaffolded curator.toml.
                    builtin fetches its pinned ~130 MB ONNX model on first
                    use (one-time, announced); hash is offline and
                    deterministic (no ML)
@@ -200,9 +203,18 @@ fn run_or_fail(result: Result<(), String>) -> ExitCode {
 }
 
 fn load_config(config_path: Option<PathBuf>) -> Result<KpConfig, String> {
-    let config_path = config_path
-        .or_else(|| std::env::var_os("KP_CONFIG").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("kp.toml"));
+    let config_path = config_path.unwrap_or_else(|| {
+        let (path, source) = curator_core::config::discover_config(
+            |name| std::env::var(name).ok(),
+            |name| Path::new(name).exists(),
+        );
+        if source == curator_core::config::ConfigSource::LegacyFile {
+            tracing::warn!(
+                "./kp.toml is the legacy config name — prefer curator.toml (kp.toml remains accepted)"
+            );
+        }
+        path
+    });
     KpConfig::load(&config_path).map_err(|e| e.to_string())
 }
 
@@ -1035,12 +1047,19 @@ fn cmd_init(args: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let dir = std::fs::canonicalize(&dir).map_err(|e| e.to_string())?;
 
-    // kp.toml, scaffolded from the shipped example (comments included),
-    // pointed at this vault. Never overwrites an existing config.
-    let config_path = dir.join("kp.toml");
-    if config_path.exists() {
-        println!("kp.toml exists — leaving it untouched");
+    // curator.toml, scaffolded from the shipped example (comments
+    // included), pointed at this vault. Never overwrites an existing
+    // config — an existing legacy ./kp.toml is honored, not duplicated.
+    let preferred = dir.join(curator_core::config::CONFIG_FILE);
+    let legacy = dir.join(curator_core::config::CONFIG_FILE_LEGACY);
+    let config_path = if preferred.exists() {
+        println!("curator.toml exists — leaving it untouched");
+        preferred
+    } else if legacy.exists() {
+        println!("kp.toml exists (legacy name, still accepted) — leaving it untouched");
+        legacy
     } else {
+        let config_path = preferred;
         let content = include_str!("../../../curator.example.toml")
             .replace(
                 "path = \"~/vault\"",
@@ -1058,7 +1077,8 @@ fn cmd_init(args: &[String]) -> Result<(), String> {
         KpConfig::from_toml_str(&content).map_err(|e| e.to_string())?;
         std::fs::write(&config_path, content).map_err(|e| e.to_string())?;
         println!("created {}", config_path.display());
-    }
+        config_path
+    };
     let config = KpConfig::load(&config_path).map_err(|e| e.to_string())?;
 
     // .kp/ scaffolding + a starter interest anchor.
