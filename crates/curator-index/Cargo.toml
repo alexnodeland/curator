@@ -1,6 +1,6 @@
 [package]
 name = "curator-index"
-description = "Knowledge Plane index: chunker, Embedder trait (builtin ONNX / hash test embedder), one embedded index.db (vectors + FTS + edges), hybrid retrieval, blue/green epochs"
+description = "Curator index: chunker, Embedder trait (builtin ONNX / hash test embedder), one embedded index.db (vectors + FTS + edges), hybrid retrieval, blue/green epochs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

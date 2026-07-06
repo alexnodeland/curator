@@ -8,7 +8,7 @@ receive an acknowledgment within 7 days.
 
 ## Scope and model
 
-The Knowledge Plane's security posture is structural, not bolted on:
+Curator's security posture is structural, not bolted on:
 
 - **Local-first.** The default deployment touches no network at all:
   vault, index, and MCP-over-stdio are all local. The only optional

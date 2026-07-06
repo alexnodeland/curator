@@ -131,7 +131,7 @@ impl KpMcpServer {
 impl ServerHandler for KpMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Knowledge Plane MCP surface v1: kp_search / kp_get_note / kp_related / \
+            "Curator MCP surface v1: kp_search / kp_get_note / kp_related / \
              kp_recent read the index; kp_propose is the only write verb (all writes \
              ride proposals/v1 and wait for human application); kp_digest_latest \
              returns the newest librarian digest.",

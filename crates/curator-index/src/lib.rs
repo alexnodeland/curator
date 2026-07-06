@@ -1,4 +1,4 @@
-//! Knowledge Plane index.
+//! Curator index.
 //!
 //! All derived retrieval state lives in ONE embedded SQLite file
 //! (`index.db`): vectors (sqlite-vec), full-text (FTS5), and a relational

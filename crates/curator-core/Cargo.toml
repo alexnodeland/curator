@@ -1,6 +1,6 @@
 [package]
 name = "curator-core"
-description = "Knowledge Plane core: vault model, kp-note/v1 frontmatter, identity, kp-config/v1 loading, proposals/v1"
+description = "Curator core: vault model, kp-note/v1 frontmatter, identity, kp-config/v1 loading, proposals/v1"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

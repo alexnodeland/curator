@@ -1,6 +1,6 @@
 ---
 name: contract-change
-description: Change one of the four published Knowledge Plane contracts (kp-note, kp-config, proposals, mcp) — classify the change, version it, update spec + schema + changelog + code in the right order. Use whenever a task touches anything under contracts/ or alters a published shape.
+description: Change one of the four published Curator contracts (kp-note, kp-config, proposals, mcp) — classify the change, version it, update spec + schema + changelog + code in the right order. Use whenever a task touches anything under contracts/ or alters a published shape.
 ---
 
 # Contract change procedure

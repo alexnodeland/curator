@@ -6,7 +6,7 @@ mod litmus;
 
 use std::process::ExitCode;
 
-const USAGE: &str = "xtask — Knowledge Plane workspace automation
+const USAGE: &str = "xtask — Curator workspace automation
 
 Usage: cargo run -p xtask -- <command>
 

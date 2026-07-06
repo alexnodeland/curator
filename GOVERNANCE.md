@@ -2,7 +2,7 @@
 
 ## Model: single maintainer (BDFL)
 
-The Knowledge Plane is designed, built, and maintained by one person. The
+Curator is designed, built, and maintained by one person. The
 maintainer has final say on scope, design, contracts, releases — and the
 still-open license decision.
 

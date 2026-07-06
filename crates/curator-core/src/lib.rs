@@ -1,4 +1,4 @@
-//! Knowledge Plane core.
+//! Curator core.
 //!
 //! The bottom of the workspace dependency graph: the vault model, the
 //! published-contract data types, identity minting/resolution, and the

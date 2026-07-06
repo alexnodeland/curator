@@ -1,4 +1,4 @@
-//! Knowledge Plane Zotero producer (read-only at v1).
+//! Curator Zotero producer (read-only at v1).
 //!
 //! Two channels:
 //! 1. **Metadata** — the Zotero Web API v3: `since=` delta polling with

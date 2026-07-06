@@ -1,4 +1,4 @@
-//! Knowledge Plane ingest — producers → vault/index.
+//! Curator ingest — producers → vault/index.
 //!
 //! Producers integrate by ADAPTER, never by template: this crate consumes
 //! a producer's own published formats and maps them onto `kp-note/v1`

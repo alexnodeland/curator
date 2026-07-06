@@ -1,4 +1,4 @@
-# Knowledge Plane — roadmap
+# Curator — roadmap
 
 > **Status:** Phases 0 and 1 are being executed now, together, as the current build.
 > This document adapts the phase plan drafted in the design round

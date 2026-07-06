@@ -1,4 +1,4 @@
-//! Knowledge Plane librarian — deterministic-first, zero-LLM baseline.
+//! Curator librarian — deterministic-first, zero-LLM baseline.
 //!
 //! Two engines live here:
 //!

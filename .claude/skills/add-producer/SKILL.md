@@ -1,6 +1,6 @@
 ---
 name: add-producer
-description: Integrate a new content producer (reader app, clipper, reference manager) into the Knowledge Plane via the adapter pattern. Use when asked to ingest a new source of notes or events.
+description: Integrate a new content producer (reader app, clipper, reference manager) into Curator via the adapter pattern. Use when asked to ingest a new source of notes or events.
 ---
 
 # Adding a producer — the adapter pattern
