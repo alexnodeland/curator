@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 
 const KP_NOTE_SCHEMA: &str = include_str!("../../../contracts/kp-note/v1.schema.json");
 const PROPOSALS_SCHEMA: &str = include_str!("../../../contracts/proposals/v1.schema.json");
+const KP_CONFIG_SCHEMA: &str = include_str!("../../../contracts/kp-config/v1.schema.json");
+const EXAMPLE_CONFIG: &str = include_str!("../../../curator.example.toml");
+const COMPOSE_CONFIG: &str = include_str!("../../../examples/compose/curator.toml");
 
 /// Compile a published schema with format assertion ON (`date-time`,
 /// `uri` are normative in the contracts, not annotations).
@@ -209,4 +212,68 @@ fn proposals_schema_rejects_nonconforming_documents() {
     for (why, instance) in &mutations {
         assert_invalid(&schema, instance, why);
     }
+}
+
+// --------------------------------------------------------------- kp-config/v1
+
+/// Parse a TOML config document to a JSON value, preserving EVERY key (unlike
+/// round-tripping through `KpConfig`, which drops unknown keys and applies
+/// defaults). This is what makes "the shipped example validates" a real check.
+fn toml_to_json(raw: &str) -> Value {
+    let doc: toml::Value = toml::from_str(raw).expect("config toml parses");
+    serde_json::to_value(doc).expect("toml → json")
+}
+
+#[test]
+fn kp_config_schema_accepts_the_shipped_example_configs() {
+    let schema = compile(KP_CONFIG_SCHEMA);
+    // The canonical example a user copies to curator.toml.
+    assert_valid(&schema, &toml_to_json(EXAMPLE_CONFIG));
+    // The container/compose profile config (http transport, builtin embedder).
+    assert_valid(&schema, &toml_to_json(COMPOSE_CONFIG));
+}
+
+#[test]
+fn kp_config_schema_rejects_nonconforming_documents() {
+    let schema = compile(KP_CONFIG_SCHEMA);
+    let valid = toml_to_json(EXAMPLE_CONFIG);
+    assert_valid(&schema, &valid);
+
+    let mutations: [(&str, Value); 4] = [
+        ("wrong schema pin", {
+            let mut v = valid.clone();
+            v["schema"] = json!("kp-config/v2");
+            v
+        }),
+        ("embedder outside the normative value set", {
+            let mut v = valid.clone();
+            v["index"]["embedder"] = json!("gpt-magic");
+            v
+        }),
+        ("mcp transport outside the normative value set", {
+            let mut v = valid.clone();
+            v["mcp"]["transport"] = json!("grpc");
+            v
+        }),
+        ("api_base is not a URI", {
+            let mut v = valid.clone();
+            v["zotero"]["api_base"] = json!("not a url");
+            v
+        }),
+    ];
+    for (why, instance) in &mutations {
+        assert_invalid(&schema, instance, why);
+    }
+}
+
+#[test]
+fn kp_config_schema_tolerates_forward_compatible_unknown_keys() {
+    // The loader warns-not-fails on unknown keys; the schema must agree
+    // (additionalProperties: true), or the contract's forward-compatibility
+    // promise would be a lie.
+    let schema = compile(KP_CONFIG_SCHEMA);
+    let mut v = toml_to_json(EXAMPLE_CONFIG);
+    v["some_future_table"] = json!({ "k": "v" });
+    v["index"]["some_future_key"] = json!(true);
+    assert_valid(&schema, &v);
 }

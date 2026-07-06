@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://knowledge-plane.invalid/contracts/kp-config/v1.schema.json",
+  "$comment": "$id domain is a placeholder until the project-identity decision lands. Validates curator.toml (legacy name kp.toml). The loader treats UNKNOWN keys as warnings, never errors, so every object keeps additionalProperties:true — the schema documents the known shape and the normative value sets (embedder, transport), it does not forbid forward-compatible extension.",
+  "title": "kp-config/v1 curator.toml",
+  "type": "object",
+  "required": ["schema"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "kp-config/v1"
+    },
+    "vault": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "proposals_dir": { "type": "string", "minLength": 1 }
+      }
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "embedder": {
+          "enum": ["builtin", "hash"],
+          "$comment": "builtin = in-process pinned CPU ONNX; hash = deterministic offline test embedder."
+        },
+        "chunk_tokens": { "type": "integer", "minimum": 1 },
+        "chunk_overlap": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "curio": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "events_dir": { "type": "string" },
+        "notes_dirs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "zotero": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "api_base": { "type": "string", "format": "uri" },
+        "user_id": { "type": "string" },
+        "api_key_env": {
+          "type": "string",
+          "$comment": "The NAME of an env var holding the key — never the key itself."
+        },
+        "webdav_fallback": { "type": "boolean" },
+        "webdav_url": { "type": "string" }
+      }
+    },
+    "librarian": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "now_path": { "type": "string" },
+        "digest_dir": { "type": "string" },
+        "half_life_days": { "type": "integer", "minimum": 1 },
+        "top_k": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "transport": { "enum": ["stdio", "http"] },
+        "http_bind": { "type": "string" },
+        "bearer_token_env": {
+          "type": "string",
+          "$comment": "The NAME of an env var holding the bearer token; required when transport = http."
+        }
+      }
+    }
+  }
+}
