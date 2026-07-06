@@ -9,6 +9,7 @@
 //! |---|---|
 //! | [`walker`] | vault walk: dot-dirs skipped, `.kpignore` honored |
 //! | [`curio`] | the Curio adapter: vendored-schema validation, `curio_id` → `curio:<id>`, managed split, manifest ownership oracle |
+//! | [`webclip`] | the web-clip adapter: browser read-and-save notes (Web Viewers, clippers) → `kp-note/v1`, tolerant, `path:` identity |
 //! | [`events`] | rotation-aware `curio.events.v1` tail → behavior rollups |
 //! | [`chunker`] | heading-aware markdown chunker (fences atomic) |
 //! | [`mod@ingest`] | the orchestration: walk → adapt → chunk → batch-embed → upsert → link → tail |
@@ -19,6 +20,7 @@ pub mod error;
 pub mod events;
 pub mod ingest;
 pub mod walker;
+pub mod webclip;
 
 pub use chunker::chunk_markdown;
 pub use curio::{AdaptedCurio, CurioAdapt, CurioAdapter, CurioEvent, CurioManifest, ManagedSplit};
@@ -26,3 +28,4 @@ pub use error::IngestError;
 pub use events::{EVENTS_CONSUMER, TailReport, tail_events};
 pub use ingest::{IngestReport, LinkKind, RawLink, RebuildReport, extract_links, ingest, rebuild};
 pub use walker::{KpIgnore, WalkReport, WalkedNote, walk_vault};
+pub use webclip::adapt_webclip;

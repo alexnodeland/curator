@@ -503,6 +503,12 @@ fn cmd_ingest(args: &[String]) -> Result<(), String> {
             report.removed,
             report.links,
         );
+        if report.web_clips > 0 {
+            println!(
+                "web clips: {} browser-saved note(s) mapped onto kp-note/v1",
+                report.web_clips
+            );
+        }
         if let Some(events) = &report.events {
             println!(
                 "events: {} folded, {} duplicate(s), {} malformed across {} file(s)",

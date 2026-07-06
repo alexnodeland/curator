@@ -370,3 +370,62 @@ fn vanished_notes_are_pruned_and_edits_reembed() {
         .expect("still indexed");
     assert_eq!(a.path, "a.md");
 }
+
+/// A web clip saved into the vault by a browser read-and-save tool (a
+/// built-in Web Viewer / a clipper) is recognized and indexed with its frontmatter
+/// mapped onto kp-note/v1 — proper title, citable source, tags, and date,
+/// where a `Foreign` note would have indexed as filename-only. The vault
+/// file is never rewritten.
+#[test]
+fn web_clip_ingests_with_mapped_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vault_dir = dir.path().join("vault");
+    std::fs::create_dir_all(vault_dir.join("clips")).expect("mkdir clips");
+    let clip_path = vault_dir.join("clips").join("attention.md");
+    let clip = "---\n\
+title: Attention Is All You Need\n\
+source: https://arxiv.org/abs/1706.03762\n\
+author: Vaswani et al.\n\
+published: 2017-06-12\n\
+tags:\n  - clippings\n  - ml\n\
+---\n\
+The dominant sequence transduction models are based on recurrent networks.\n";
+    std::fs::write(&clip_path, clip).expect("write clip");
+    let original = std::fs::read_to_string(&clip_path).expect("read clip");
+
+    let index_path = dir.path().join("kp").join("index.db");
+    let toml = format!(
+        "schema = \"kp-config/v1\"\n\
+         [vault]\npath = \"{vault}\"\n\
+         [index]\npath = \"{index}\"\nembedder = \"hash\"\nchunk_tokens = 64\nchunk_overlap = 8\n\
+         [curio]\nenabled = false\n",
+        vault = vault_dir.display(),
+        index = index_path.display(),
+    );
+    let cfg = KpConfig::from_toml_str(&toml).expect("config parses");
+
+    let embedder = HashEmbedder::new(64);
+    let report = ingest(&cfg, &embedder).expect("ingest runs");
+    assert_eq!(report.web_clips, 1, "the clip is recognized by the adapter");
+    assert_eq!(report.ingested, 1);
+
+    let index = Index::open(&index_path, &embedder).expect("open index");
+    let reader = index.reader().expect("reader");
+    let rec = reader
+        .get_note("path:clips/attention.md")
+        .expect("query")
+        .expect("the clip is indexed under its path identity");
+    assert_eq!(rec.title, "Attention Is All You Need");
+    assert_eq!(
+        rec.source.as_deref(),
+        Some("https://arxiv.org/abs/1706.03762")
+    );
+    assert_eq!(rec.tags, vec!["clippings".to_owned(), "ml".to_owned()]);
+    assert_eq!(rec.created.as_deref(), Some("2017-06-12T00:00:00Z"));
+
+    // The producing tool keeps byte-ownership: the file on disk is untouched.
+    assert_eq!(
+        std::fs::read_to_string(&clip_path).expect("re-read"),
+        original
+    );
+}
