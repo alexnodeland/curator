@@ -31,10 +31,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: build the site
-        run: cargo run -p xtask -- docs
+        # `target/` is restored from the rust-cache, so a stale `site/` or
+        # `site-first/` from a prior run would survive: clean both first, or
+        # the determinism `mv` below nests into a leftover dir and the diff
+        # spuriously fails.
+        run: |
+          rm -rf target/site target/site-first
+          cargo run -p xtask -- docs
 
       - name: determinism check (same sources -> same site)
         run: |
+          rm -rf target/site-first
           mv target/site target/site-first
           cargo run -p xtask -- docs
           diff -r target/site-first target/site
