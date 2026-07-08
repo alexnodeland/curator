@@ -1,27 +1,30 @@
 # Curator — roadmap
 
-> **Status:** Phases 0 and 1 are being executed now, together, as the current build.
-> This document adapts the phase plan drafted in the design round
-> ([research/roadmap.json](research/roadmap.json)); where that draft predates later
-> rulings — notably the language re-decision to **Rust** and the final contract shapes —
-> this document and the published contracts win. Instance-only items (the maintainer's
-> private reference deployment) are marked *(instance-side)*; they are configuration of
-> that deployment, never product code.
+> **Status:** the implementation has **landed through Phase 4 — v1 is complete**,
+> and Phase 5 (Curio native integration) is in as of Curio's own v0.1.0. Phase 6
+> (OSS hardening + public launch) is underway with this release. The phase plan
+> below is the design record the build was measured against, not a to-do list;
+> the per-phase text is preserved as that record. Where an early draft
+> ([research/roadmap.json](research/roadmap.json)) predates later rulings —
+> notably the language re-decision to **Rust** and the final contract shapes —
+> this document and the published contracts win. Instance-only items (the
+> maintainer's private reference deployment) are marked *(instance-side)*; they
+> are configuration of that deployment, never product code.
 
 ## Phase overview
 
 | phase | name | gate to enter | status |
 |---|---|---|---|
-| 0 | Decisions, contracts, scaffold | — | **executing now** |
-| 1 | Spine: vault, MCP reads, proposals | — | **executing now** |
-| 2 | Ingestion: Zotero two-channel + web clips | Phase 1 | next |
-| 3 | Index + retrieval | measured resource entry gate | planned |
-| 4 | Librarian + deterministic digest (v1 complete) | Phase 3 | planned |
-| 5 | Curio native integration | Curio ships released contracts | calendar-gated |
-| 6 | OSS hardening + public launch | ≥8 weeks instance survival on tagged code; name + license decided | gated |
+| 0 | Decisions, contracts, scaffold | — | ✅ landed |
+| 1 | Spine: vault, MCP reads, proposals | — | ✅ landed |
+| 2 | Ingestion: Zotero two-channel + web clips | Phase 1 | ✅ landed |
+| 3 | Index + retrieval | measured resource entry gate | ✅ landed |
+| 4 | Librarian + deterministic digest (v1 complete) | Phase 3 | ✅ **landed — v1 complete** |
+| 5 | Curio native integration | Curio ships released contracts | ✅ landed (adapter + events) |
+| 6 | OSS hardening + public launch | ≥8 weeks instance survival on tagged code; name + license decided | 🚧 in progress (this release) |
 | 7 | Post-launch menu | per-item gates | menu |
 
-## Phase 0 — Decisions, contracts, scaffold *(executing now)*
+## Phase 0 — Decisions, contracts, scaffold *(landed)*
 
 **Goal:** lock the irreversible choices, file the time-critical Curio schema review
 upstream, and stand up a public-safe repo whose history is publishable by construction
@@ -46,7 +49,7 @@ recorded; contracts drafted; repo scaffold committed.
 **Size:** 1–2 weeks calendar. **OSS state:** nothing runnable; a stranger could read
 the contracts and architecture docs.
 
-## Phase 1 — Spine: vault, MCP reads, proposals *(executing now)*
+## Phase 1 — Spine: vault, MCP reads, proposals *(landed)*
 
 **Goal:** any markdown vault becomes agent-addressable — reads via MCP, writes only via
 proposals — with the full safety model working **forge-free** (the OSS default) and

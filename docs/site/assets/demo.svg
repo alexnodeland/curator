@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 494" width="860" height="494" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-labelledby="t d">
+  <title id="t">A curator terminal session</title>
+  <desc id="d">Initialising a vault, running a hybrid search, generating a librarian digest, and printing status — all offline with the deterministic hash embedder.</desc>
+  <style>
+    .p { fill: #3fb950; }        /* prompt $        */
+    .c { fill: #e6edf3; }        /* command         */
+    .s { fill: #a5d6ff; }        /* string / path   */
+    .o { fill: #8b949e; }        /* output text     */
+    .n { fill: #56d4dd; }        /* numbers/accents */
+    .k { fill: #d2a8ff; }        /* keyword accent  */
+    text { font-size: 14px; white-space: pre; }
+  </style>
+
+  <rect x="8" y="8" width="844" height="478" rx="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <circle cx="32" cy="30" r="6" fill="#ff5f56"/>
+  <circle cx="52" cy="30" r="6" fill="#ffbd2e"/>
+  <circle cx="72" cy="30" r="6" fill="#27c93f"/>
+  <text x="430" y="35" text-anchor="middle" fill="#6e7681" font-size="12">curator — the Knowledge Plane</text>
+  <line x1="8" y1="50" x2="852" y2="50" stroke="#21262d" stroke-width="1"/>
+
+  <g transform="translate(28,78)">
+    <text y="0"><tspan class="p">$ </tspan><tspan class="c">curator init </tspan><tspan class="s">~/vault</tspan><tspan class="c"> --embedder hash</tspan></text>
+    <text y="22" class="o">created <tspan class="s">~/vault/curator.toml</tspan></text>
+    <text y="44" class="o">first index built: <tspan class="n">12</tspan> note(s) ingested (0 skipped, 0 ignored)</text>
+
+    <text y="82"><tspan class="p">$ </tspan><tspan class="c">curator search </tspan><tspan class="s">"hybrid retrieval"</tspan></text>
+    <text y="104" class="o">  <tspan class="n">0.0318</tspan>  <tspan class="s">path:now.md</tspan>                        now</text>
+    <text y="126" class="o">  <tspan class="n">0.0315</tspan>  <tspan class="s">path:notes/hybrid-retrieval.md</tspan>     hybrid-retrieval</text>
+    <text y="148" class="o">  <tspan class="n">0.0315</tspan>  <tspan class="s">path:notes/zettelkasten.md</tspan>         zettelkasten-workflow</text>
+
+    <text y="186"><tspan class="p">$ </tspan><tspan class="c">curator digest run</tspan><tspan class="o">   # the librarian, zero LLM</tspan></text>
+    <text y="208" class="o">digest <tspan class="n">2026-07-08</tspan> → digests/2026-07-08.md: <tspan class="n">11</tspan> surfaced of <tspan class="n">11</tspan> candidate(s)</text>
+    <text y="230" class="o"><tspan class="k">proposal</tspan> 01KWZG…9AV  (<tspan class="k">open</tspan> — `curator apply` after review)</text>
+
+    <text y="268"><tspan class="p">$ </tspan><tspan class="c">curator status</tspan></text>
+    <text y="290" class="o">vault      <tspan class="s">~/vault</tspan> — <tspan class="n">12</tspan> note(s)</text>
+    <text y="312" class="o">index      epoch <tspan class="n">1</tspan> · schema v2 · hash (<tspan class="n">256</tspan> dims) · <tspan class="n">12</tspan> note(s)</text>
+    <text y="334" class="o">proposals  <tspan class="n">1</tspan> total, <tspan class="n">1</tspan> open</text>
+    <text y="356" class="o">mcp        stdio</text>
+
+    <text y="392"><tspan class="p">$ </tspan><tspan class="c">_</tspan></text>
+  </g>
+</svg>
