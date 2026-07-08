@@ -107,7 +107,11 @@ Nothing in Curator's agent surface writes your notes. `kp_propose` (and
 deterministic validator hard-rejects anything touching producer-owned
 state (`.curio/**`, managed regions), any path outside the vault, any
 patch that doesn't apply cleanly, and any identity collision;
-`curator review` renders it; `curator apply` applies and stamps status.
+`curator apply` applies and stamps status. The human gate is
+[`curator review`](reference/cli.md#curator-review-apply-reject-proposals-list) —
+an interactive reviewer over the whole queue (coloured diff, a
+non-destructive pre-flight drift check, apply/reject with confirm), so
+you see exactly what a proposal would do before the one-way decision.
 
 The mechanism is **local-first and forge-free** — a laptop with no git
 remote gets the full safety model. The identical validator can run as a

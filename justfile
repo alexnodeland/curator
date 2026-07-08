@@ -102,6 +102,10 @@ demo:
     echo "== curator doctor =="
     run doctor --config "$cfg"
     echo
+    echo "== the digest above is an OPEN proposal — now review it interactively: =="
+    echo "   cargo run -p curator-cli --no-default-features -- review --config $cfg"
+    echo "   (or, once installed: curator review --config $cfg)"
+    echo
     echo "demo vault: $scratch/vault (config inside; rerun with 'just demo')"
 
 # The REAL end-to-end loop — the release blocker: builtin ONNX

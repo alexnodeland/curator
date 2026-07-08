@@ -184,6 +184,8 @@ banner that checks — non-destructively — whether the patch still applies
 cleanly against the current vault, so drift is visible *before* you commit
 (apply is destructive-on-reject). Apply and reject both ask to confirm.
 
+![The curator review TUI: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff — apply or reject from the footer](../assets/review.svg)
+
 | key | action |
 |---|---|
 | `j` / `k`, `↑` / `↓` | move between proposals |

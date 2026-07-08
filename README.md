@@ -44,7 +44,7 @@ service, no telemetry.
 | 🧭 **One index, disposable** | a single embedded `index.db` with blue/green epochs — a crashed rebuild never touches the serving copy; derive it, never migrate it |
 | 🤖 **MCP for agents** | one entrypoint, six tools (`search` / `get_note` / `related` / `recent` / `propose` / `digest_latest`) over stdio or bearer-authenticated HTTP |
 | 📰 **Deterministic librarian** | ranked, grouped digests of what's new against your `now.md` interests — zero LLM, byte-identical for identical inputs |
-| ✍️ **Agents propose, you decide** | the only write path is a validated, human-applied `proposals/v1` changeset; `.curio/` and managed regions are hard-rejected |
+| ✍️ **Agents propose, you decide** | the only write path is a validated, human-applied `proposals/v1` changeset; review the queue in an interactive TUI (`curator review`) with a live pre-flight drift check, apply/reject with confirm; `.curio/` and managed regions are hard-rejected |
 | 📚 **Zotero, two-channel** | read-only delta + fulltext sync into plain notes — citekey-named, RFC3339 dates, DOI / tags / abstract mapped |
 | 📥 **Producers, not plugins** | any tool that writes conforming markdown is a source: the Curio reader, browser web-clips, your own scripts |
 | 🧩 **Embed your way** | in-process ONNX (`bge-small`, 384-dim) or an offline deterministic `hash` embedder — one config switch, no model server |
@@ -69,6 +69,23 @@ flowchart LR
     ag -.->|proposals/v1| v
     cli --> you["You"]
 ```
+
+## Review proposals interactively
+
+`curator review` is the human half of *agents propose, you decide* — a
+full-screen reviewer over the proposal queue. Move through the queue, read each
+changeset's coloured diff, and **apply or reject** with a confirm step. A
+**pre-flight** banner checks — non-destructively — whether the patch still
+applies cleanly against your current vault, so drift is visible *before* you
+commit (a failed apply is a terminal reject, so this matters).
+
+![The curator review TUI: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff — apply or reject from the footer](docs/site/assets/review.svg)
+
+Run it with no id in a terminal. `curator review <id>` still prints a
+scriptable one-proposal render, and a piped/non-interactive `curator review`
+prints guidance instead of blocking; `curator apply <id>` / `curator reject
+<id>` are the non-interactive verbs. Full key map:
+[CLI reference](https://alexnodeland.github.io/curator/reference/cli.html#curator-review-apply-reject-proposals-list).
 
 ## Install
 
