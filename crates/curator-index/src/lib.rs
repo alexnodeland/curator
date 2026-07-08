@@ -9,7 +9,7 @@
 pub mod chunk;
 pub mod db;
 pub mod embed;
-#[cfg(feature = "embed-onnx")]
+#[cfg(feature = "_embed-onnx-impl")]
 pub mod embed_onnx;
 pub mod epoch;
 pub mod error;
@@ -21,7 +21,7 @@ pub use db::{
     BehaviorDelta, BehaviorStats, Index, IndexMeta, IndexReader, NoteState, SCHEMA_VERSION,
 };
 pub use embed::{Embedder, HashEmbedder, embedder_from_config};
-#[cfg(feature = "embed-onnx")]
+#[cfg(feature = "_embed-onnx-impl")]
 pub use embed_onnx::FastEmbedder;
 pub use epoch::{ChunkFn, EpochReport, EpochSource, build_epoch, build_epoch_from};
 pub use error::IndexError;
