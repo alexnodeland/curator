@@ -85,6 +85,15 @@ curator --version
 
 Other channels:
 
+- **Homebrew** — a build-from-source formula that loads Homebrew's
+  `onnxruntime` at runtime (so `curator` ships the real semantic embedder, not
+  the offline fallback):
+
+  ```sh
+  brew install alexnodeland/tap/curator
+  ```
+
+  Details: [`dist/homebrew/README.md`](dist/homebrew/README.md).
 - **Release binaries** — every `v*` tag builds `curator` for linux x86_64 +
   macOS arm64 with `SHA256SUMS` into a *draft* GitHub release
   ([`.github/workflows/release.yml`](.github/workflows/release.yml)); a human

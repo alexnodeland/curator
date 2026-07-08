@@ -29,8 +29,15 @@ tracing-subscriber = { workspace = true }
 # The pinned in-process ONNX embedder (`embedder = "builtin"`), on by
 # default. `cargo build -p curator-cli --no-default-features` produces a lean
 # hash-only `curator` with zero build-time or run-time downloads.
+#
+# `embed-onnx-dynamic` swaps the ONNX Runtime *link* strategy from
+# build-time download to runtime system load (see curator-index) — the
+# Homebrew formula builds with `--no-default-features --features
+# embed-onnx-dynamic` so it needs no network at build time and loads
+# Homebrew's `onnxruntime` at run time.
 default = ["embed-onnx"]
 embed-onnx = ["curator-index/embed-onnx"]
+embed-onnx-dynamic = ["curator-index/embed-onnx-dynamic"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

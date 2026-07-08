@@ -167,7 +167,8 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// The embedder named by `[index].embedder` in `kp.toml`: `"builtin"` —
-/// the pinned in-process ONNX model (requires the `embed-onnx` feature) —
+/// the pinned in-process ONNX model (requires the `embed-onnx` or
+/// `embed-onnx-dynamic` feature) —
 /// or `"hash"`, the deterministic test embedder. The one selection point
 /// every serving surface (CLI batch commands, MCP server) shares, so a
 /// config can never mean two different models in two entrypoints.
@@ -176,14 +177,16 @@ pub fn embedder_from_config(
 ) -> Result<Box<dyn Embedder>, EmbedError> {
     match config.index.embedder.as_str() {
         "hash" => Ok(Box::new(HashEmbedder::default())),
-        #[cfg(feature = "embed-onnx")]
+        #[cfg(feature = "_embed-onnx-impl")]
         "builtin" => Ok(Box::new(crate::embed_onnx::FastEmbedder::from_config(
             config,
         ))),
-        #[cfg(not(feature = "embed-onnx"))]
+        #[cfg(not(feature = "_embed-onnx-impl"))]
         "builtin" => Err(EmbedError::Backend {
             backend: "builtin".to_owned(),
-            message: "this binary was built without the embed-onnx feature".to_owned(),
+            message: "this binary was built without ONNX support (no embed-onnx / \
+                      embed-onnx-dynamic feature) — use embedder = \"hash\""
+                .to_owned(),
         }),
         other => Err(EmbedError::Backend {
             backend: other.to_owned(),

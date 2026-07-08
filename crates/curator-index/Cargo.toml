@@ -18,21 +18,31 @@ tracing = { workspace = true }
 # The pinned in-process CPU ONNX embedder (`builtin`), on by default for
 # this crate — verified to build and link cleanly on Apple Silicon (see
 # docs/design/decisions.md §4). Model fetch is lazy, so the DEFAULT test
-# suite stays hermetic. NOTE: the `ort-download-binaries-*` feature means
-# `cargo build` with this feature fetches ONNX Runtime binaries from the
-# pyke CDN at BUILD time. Library consumers in this workspace depend on
-# curator-index with default-features = false; the `curator` binary opts in via
-# curator-cli's default `embed-onnx` feature, so
-# `cargo build -p curator-cli --no-default-features` is a lean, download-free
-# build (gated in CI via `just lean-check`).
+# suite stays hermetic. The ONNX Runtime link strategy is chosen by the
+# feature that turns fastembed on (see `[features]` below), never fixed
+# here. Library consumers in this workspace depend on curator-index with
+# default-features = false; `cargo build -p curator-cli --no-default-features`
+# is a lean, download-free build (gated in CI via `just lean-check`).
 fastembed = { version = "5.17", optional = true, default-features = false, features = [
-    "ort-download-binaries-native-tls",
     "hf-hub-native-tls",
 ] }
 
 [features]
 default = ["embed-onnx"]
-embed-onnx = ["dep:fastembed"]
+# The in-process CPU ONNX embedder (`embedder = "builtin"`) — one embedder,
+# two ONNX Runtime link strategies:
+#  - `embed-onnx` (default): ort DOWNLOADS a pinned ONNX Runtime from the
+#    pyke CDN at BUILD time. The normal `cargo build` / `cargo install` path.
+#  - `embed-onnx-dynamic`: ort loads a SYSTEM ONNX Runtime at RUN time (e.g.
+#    Homebrew's `onnxruntime`) — zero build-time download, so it builds in a
+#    network-sandboxed environment (Homebrew, hermetic CI). The binary then
+#    needs `libonnxruntime` at run time via `ORT_DYLIB_PATH` or a standard
+#    search path.
+# Both activate the same embedder code via the private `_embed-onnx-impl`
+# marker, so the retrieval stack is identical regardless of link strategy.
+embed-onnx = ["_embed-onnx-impl", "fastembed?/ort-download-binaries-native-tls"]
+embed-onnx-dynamic = ["_embed-onnx-impl", "fastembed?/ort-load-dynamic"]
+_embed-onnx-impl = ["dep:fastembed"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
