@@ -753,7 +753,7 @@ fn cmd_review(args: &[String]) -> Result<(), String> {
                 );
                 return Ok(());
             }
-            tui::run_review(&vault, &config.vault.proposals_dir)
+            tui::run_review(&config)
         }
         // One id → the original non-interactive render (unchanged, scriptable).
         [id] => {

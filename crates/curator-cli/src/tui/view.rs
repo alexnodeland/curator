@@ -1,6 +1,6 @@
-//! Rendering the reviewer: a proposal list, a detail/diff pane, a footer,
-//! and the confirm / help overlays. Pure over [`ReviewApp`] + the loaded
-//! detail — no I/O, no terminal state.
+//! Rendering the Review screen: a proposal list, a detail/diff pane, and the
+//! confirm overlay. Pure over [`ReviewApp`] + the loaded detail — no I/O, no
+//! terminal state. The shell draws the tab bar and footer around this.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -10,33 +10,30 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 
 use curator_core::ProposalStatus;
 
-use super::app::{FlashLevel, Loaded, Mode, Pending, ReviewApp, short_id, status_label};
+use super::app::{Loaded, Mode, Pending, ReviewApp, short_id, status_label};
+use super::common::{centered_rect, kv};
 use super::diff::diff_lines;
 
 const EMPTY_STATE: &str = "No proposals.\n\n\
     Agents create proposals via `curator propose` or `curator digest run`.\n\
-    They land here for you to review, apply, or reject.";
+    They land here for you to review, apply, or reject.\n\n\
+    Press 3 (or Tab) for Digest to generate one now.";
 
-/// Draw the whole reviewer for one frame.
-pub fn render(frame: &mut Frame, app: &ReviewApp, loaded: Option<&Loaded>) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(frame.area());
+/// Key hints shown in the shell footer while the Review screen is active.
+pub const HINT: &str = " j/k move · ^d/^u scroll · f filter · a apply · x reject · r refresh";
 
+/// Draw the Review screen into `area` (the region between tab bar and footer).
+pub fn render(frame: &mut Frame, app: &ReviewApp, loaded: Option<&Loaded>, area: Rect) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(38), Constraint::Min(20)])
-        .split(rows[0]);
+        .split(area);
 
     render_list(frame, app, cols[0]);
     render_detail(frame, app, loaded, cols[1]);
-    render_footer(frame, app, rows[1]);
 
-    match app.mode() {
-        Mode::Confirm(pending) => render_confirm(frame, pending, loaded, frame.area()),
-        Mode::Help => render_help(frame, frame.area()),
-        Mode::Browse => {}
+    if let Mode::Confirm(pending) = app.mode() {
+        render_confirm(frame, pending, loaded, area);
     }
 }
 
@@ -141,22 +138,6 @@ fn render_detail(frame: &mut Frame, app: &ReviewApp, loaded: Option<&Loaded>, ar
     );
 }
 
-fn render_footer(frame: &mut Frame, app: &ReviewApp, area: Rect) {
-    let line = match app.flash() {
-        Some(flash) => Line::from(Span::styled(
-            format!(" {}", flash.text),
-            Style::default()
-                .fg(flash_color(flash.level))
-                .add_modifier(Modifier::BOLD),
-        )),
-        None => Line::from(Span::styled(
-            " j/k move · ^d/^u scroll · f filter · a apply · x reject · r refresh · ? help · q quit",
-            Style::default().fg(Color::DarkGray),
-        )),
-    };
-    frame.render_widget(Paragraph::new(line), area);
-}
-
 fn render_confirm(frame: &mut Frame, pending: &Pending, loaded: Option<&Loaded>, area: Rect) {
     let (verb, id, is_apply) = match pending {
         Pending::Apply(id) => ("Apply", id, true),
@@ -197,7 +178,7 @@ fn render_confirm(frame: &mut Frame, pending: &Pending, loaded: Option<&Loaded>,
         Span::raw(" cancel"),
     ]));
 
-    let popup = centered_rect(60, 34, area);
+    let popup = centered_rect(60, 40, area);
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(lines)
@@ -211,89 +192,12 @@ fn render_confirm(frame: &mut Frame, pending: &Pending, loaded: Option<&Loaded>,
     );
 }
 
-fn render_help(frame: &mut Frame, area: Rect) {
-    let keys = [
-        ("j / k   ↑ / ↓", "move between proposals"),
-        ("^d / ^u", "scroll the diff (also PgDn / PgUp)"),
-        ("f", "cycle filter: all → open → applied → rejected"),
-        ("a", "apply the selected proposal (asks to confirm)"),
-        ("x", "reject the selected proposal (asks to confirm)"),
-        ("r", "refresh the queue from disk"),
-        ("?", "toggle this help"),
-        ("q / Esc", "quit"),
-    ];
-    let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled(
-            "curator review — keys",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    for (k, v) in keys {
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {k:<14}"), Style::default().fg(Color::Cyan)),
-            Span::raw(v),
-        ]));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "any key to dismiss",
-        Style::default().fg(Color::DarkGray),
-    )));
-
-    let popup = centered_rect(66, 60, area);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" help "))
-            .wrap(Wrap { trim: false }),
-        popup,
-    );
-}
-
-// --- small helpers ---
-
-fn kv(key: &str, val: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{key}: "), Style::default().fg(Color::DarkGray)),
-        Span::raw(val.to_owned()),
-    ])
-}
-
 fn status_glyph(status: ProposalStatus) -> (&'static str, Color) {
     match status {
         ProposalStatus::Open => ("●", Color::Yellow),
         ProposalStatus::Applied => ("✓", Color::Green),
         ProposalStatus::Rejected => ("✗", Color::Red),
     }
-}
-
-fn flash_color(level: FlashLevel) -> Color {
-    match level {
-        FlashLevel::Success => Color::Green,
-        FlashLevel::Warn => Color::Yellow,
-        FlashLevel::Error => Color::Red,
-    }
-}
-
-/// A rectangle `pct_x` × `pct_y` percent of `area`, centred.
-fn centered_rect(pct_x: u16, pct_y: u16, area: Rect) -> Rect {
-    let vert = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - pct_y) / 2),
-            Constraint::Percentage(pct_y),
-            Constraint::Percentage((100 - pct_y) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - pct_x) / 2),
-            Constraint::Percentage(pct_x),
-            Constraint::Percentage((100 - pct_x) / 2),
-        ])
-        .split(vert[1])[1]
 }
 
 #[cfg(test)]
@@ -319,7 +223,9 @@ mod tests {
     fn rendered_text(app: &ReviewApp, loaded: Option<&Loaded>) -> String {
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal.draw(|f| render(f, app, loaded)).expect("draw");
+        terminal
+            .draw(|f| render(f, app, loaded, f.area()))
+            .expect("draw");
         terminal
             .backend()
             .buffer()
@@ -330,11 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn renders_the_list_title_and_footer_hints() {
+    fn renders_the_list_title_and_the_selected_title() {
         let app = ReviewApp::new(vec![open_proposal()]);
         let text = rendered_text(&app, None);
         assert!(text.contains("Daily digest"), "list shows the title");
-        assert!(text.contains("apply"), "footer shows key hints");
         assert!(text.contains("proposals"), "list block title present");
     }
 

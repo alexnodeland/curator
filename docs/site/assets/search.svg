@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 556" width="900" height="556" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-labelledby="t d">
+  <title id="t">The curator Search screen</title>
+  <desc id="d">The Search screen of the curator TUI: a tab bar with Search active, a query box reading "rust database" in hybrid mode, a ranked results list on the left (score and note title, path underneath), and the opened note's full content in a preview pane on the right.</desc>
+  <style>
+    .val { fill: #e6edf3; }
+    .lbl { fill: #8b949e; }
+    .dim { fill: #6e7681; }
+    .cy  { fill: #56d4dd; }
+    .tab { fill: #8b949e; }
+    text { font-size: 14px; white-space: pre; }
+  </style>
+
+  <rect x="8" y="8" width="884" height="540" rx="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <circle cx="32" cy="30" r="6" fill="#ff5f56"/>
+  <circle cx="52" cy="30" r="6" fill="#ffbd2e"/>
+  <circle cx="72" cy="30" r="6" fill="#27c93f"/>
+  <text x="450" y="35" text-anchor="middle" fill="#6e7681" font-size="12">curator review</text>
+  <line x1="8" y1="50" x2="892" y2="50" stroke="#21262d" stroke-width="1"/>
+
+  <!-- tab bar: Search active -->
+  <text x="28" y="71"><tspan class="tab">Review</tspan> <tspan class="dim">│</tspan></text>
+  <rect x="99" y="58" width="66" height="18" rx="3" fill="#56d4dd"/>
+  <text x="107" y="71"><tspan fill="#0d1117" font-weight="600">Search</tspan></text>
+  <text x="173" y="71"><tspan class="dim">│</tspan> <tspan class="tab">Digest</tspan>     <tspan class="dim">Tab/1·2·3 switch · ? help</tspan></text>
+
+  <!-- query box -->
+  <rect x="20" y="84" width="864" height="30" fill="none" stroke="#56d4dd" stroke-width="1"/>
+  <rect x="32" y="78" width="130" height="12" fill="#0d1117"/>
+  <text x="36" y="89" class="cy"> search · hybrid </text>
+  <text x="34" y="104"><tspan class="dim">›</tspan> <tspan class="val">rust database</tspan><tspan class="cy">▍</tspan></text>
+
+  <!-- results pane -->
+  <rect x="20" y="122" width="392" height="378" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="32" y="116" width="238" height="12" fill="#0d1117"/>
+  <text x="36" y="127" class="val"> results · 12 hits · hybrid </text>
+
+  <rect x="22" y="132" width="388" height="20" fill="#1f242c"/>
+  <text x="30" y="146"><tspan class="cy">▍  0.033</tspan> <tspan class="val">embedded-vector-search</tspan></text>
+  <text x="30" y="164" class="dim">         notes/embedded-vector-search.md</text>
+  <text x="30" y="186"><tspan class="cy">   0.032</tspan> <tspan class="val">SQLite as an application file format</tspan></text>
+  <text x="30" y="204" class="dim">         notes/sqlite-as-application-file-format.md</text>
+  <text x="30" y="226"><tspan class="cy">   0.032</tspan> <tspan class="val">now</tspan></text>
+  <text x="30" y="244" class="dim">         now.md</text>
+  <text x="30" y="266"><tspan class="cy">   0.016</tspan> <tspan class="val">hybrid-retrieval</tspan></text>
+  <text x="30" y="284" class="dim">         notes/hybrid-retrieval.md</text>
+  <text x="30" y="306"><tspan class="cy">   0.015</tspan> <tspan class="val">espresso-dialing-in</tspan></text>
+  <text x="30" y="324" class="dim">         notes/espresso-dialing-in.md</text>
+  <text x="30" y="346"><tspan class="cy">   0.015</tspan> <tspan class="val">personal-search-engines</tspan></text>
+  <text x="30" y="364" class="dim">         notes/personal-search-engines.md</text>
+
+  <!-- note preview pane -->
+  <rect x="420" y="122" width="464" height="378" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="432" y="116" width="52" height="12" fill="#0d1117"/>
+  <text x="436" y="127" class="val"> note </text>
+  <text x="432" y="146"><tspan class="lbl">title:</tspan> <tspan class="val">embedded-vector-search</tspan></text>
+  <text x="432" y="164"><tspan class="lbl">path:</tspan> <tspan class="val">notes/embedded-vector-search.md</tspan></text>
+  <text x="432" y="182"><tspan class="lbl">ingested:</tspan> <tspan class="val">2026-07-08T07:49:41Z</tspan></text>
+  <text x="432" y="214" class="val"># Embedded vector search — no server, one file</text>
+  <text x="432" y="246" class="val">A personal knowledge base does not need a vector</text>
+  <text x="432" y="264" class="val">database service. A few thousand notes at 384</text>
+  <text x="432" y="282" class="val">dimensions is a few megabytes of floats; brute-force</text>
+  <text x="432" y="300" class="val">cosine over that is microseconds. The interesting</text>
+  <text x="432" y="318" class="val">engineering is not ANN indexes, it is operational</text>
+  <text x="432" y="336" class="val">shape: one embedded database file that lives next to</text>
+  <text x="432" y="354" class="val">the data it derives from, rebuilt from scratch</text>
+  <text x="432" y="372" class="val">whenever anything doubts it.</text>
+
+  <text x="24" y="520" class="dim"> type to search · ↵ run · j/k move · o open · r related · m mode · / edit · q quit</text>
+</svg>

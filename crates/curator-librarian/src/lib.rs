@@ -27,7 +27,10 @@ pub mod patch;
 pub mod proposals;
 pub mod uuid7;
 
-pub use digest::{DigestError, DigestReport, run_digest};
+pub use digest::{
+    Candidate, DigestError, DigestParams, DigestPreview, DigestReport, RankedCandidate,
+    extractive_summary, preview_digest, rank_candidates, run_digest,
+};
 pub use patch::{FilePatch, Hunk, HunkLine, PatchError, apply_file_patch, parse_patch};
 pub use proposals::{
     ApplyError, ApplyReport, RejectError, apply_proposal, auto_applicable, reject_proposal,

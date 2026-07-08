@@ -9,6 +9,8 @@
 use curator_core::{Proposal, ProposalStatus};
 use curator_librarian::FilePatch;
 
+use super::common::Flash;
+
 /// The first N chars of a ULID — enough to identify a proposal on screen.
 #[must_use]
 pub fn short_id(id: &str) -> String {
@@ -64,41 +66,6 @@ impl StatusFilter {
     }
 }
 
-/// A short-lived status line shown in the footer after an action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Flash {
-    pub level: FlashLevel,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlashLevel {
-    Success,
-    Warn,
-    Error,
-}
-
-impl Flash {
-    pub fn success(text: impl Into<String>) -> Self {
-        Self {
-            level: FlashLevel::Success,
-            text: text.into(),
-        }
-    }
-    pub fn warn(text: impl Into<String>) -> Self {
-        Self {
-            level: FlashLevel::Warn,
-            text: text.into(),
-        }
-    }
-    pub fn error(text: impl Into<String>) -> Self {
-        Self {
-            level: FlashLevel::Error,
-            text: text.into(),
-        }
-    }
-}
-
 /// The pre-flight verdict for the selected proposal: does its patch still
 /// apply cleanly against the CURRENT vault? Computed with the public
 /// `parse_patch` + `apply_file_patch` (never `apply_proposal`, which is
@@ -129,15 +96,15 @@ pub enum Pending {
     Reject(String),
 }
 
-/// Which screen / overlay is active.
+/// Which overlay, if any, is active over the browse view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Browse,
     Confirm(Pending),
-    Help,
 }
 
 /// A decoded intent from a key press — the reducer's input alphabet.
+/// Quit and help are the shell's concern (global), never the screen's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Msg {
     Up,
@@ -149,16 +116,13 @@ pub enum Msg {
     RequestReject,
     Confirm,
     Cancel,
-    ToggleHelp,
     Refresh,
-    Quit,
 }
 
 /// A side-effecting instruction the event loop executes after `update`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     None,
-    Quit,
     /// Re-list proposals from disk (status changed / manual refresh).
     Reload,
     Apply(String),
@@ -256,9 +220,16 @@ impl ReviewApp {
     pub fn update(&mut self, msg: Msg) -> Action {
         match self.mode.clone() {
             Mode::Confirm(pending) => self.update_confirm(msg, pending),
-            Mode::Help => self.update_help(msg),
             Mode::Browse => self.update_browse(msg),
         }
+    }
+
+    /// The reviewer is showing a confirm overlay that should capture keys —
+    /// the shell forwards everything to it rather than treating keys as
+    /// global shortcuts.
+    #[must_use]
+    pub fn is_modal(&self) -> bool {
+        matches!(self.mode, Mode::Confirm(_))
     }
 
     fn update_confirm(&mut self, msg: Msg, pending: Pending) -> Action {
@@ -270,7 +241,7 @@ impl ReviewApp {
                     Pending::Reject(id) => Action::Reject(id),
                 }
             }
-            Msg::Cancel | Msg::Quit => {
+            Msg::Cancel => {
                 self.mode = Mode::Browse;
                 Action::None
             }
@@ -278,21 +249,11 @@ impl ReviewApp {
         }
     }
 
-    fn update_help(&mut self, msg: Msg) -> Action {
-        if msg == Msg::Quit {
-            return Action::Quit;
-        }
-        self.mode = Mode::Browse;
-        Action::None
-    }
-
     fn update_browse(&mut self, msg: Msg) -> Action {
         match msg {
-            Msg::Quit => return Action::Quit,
             Msg::Refresh => return Action::Reload,
             Msg::RequestApply => return self.request(true),
             Msg::RequestReject => return self.request(false),
-            Msg::ToggleHelp => self.mode = Mode::Help,
             Msg::Down => self.move_selection(1),
             Msg::Up => self.move_selection(-1),
             Msg::ScrollDown => self.diff_scroll = self.diff_scroll.saturating_add(SCROLL_STEP),
@@ -367,6 +328,25 @@ impl ReviewApp {
         self.clamp_selection();
     }
 
+    /// Select the proposal with `id`, if it is visible under the current
+    /// filter. Used to jump to a freshly-created proposal (a just-generated
+    /// digest sorts last by ULID, so the caller must seek it, not assume 0).
+    pub fn select_by_id(&mut self, id: &str) {
+        if let Some(idx) = self.visible().iter().position(|p| p.id == id) {
+            self.selected = idx;
+            self.diff_scroll = 0;
+        }
+    }
+
+    /// Dismiss a pending confirm overlay — e.g. when the user tabs away — so a
+    /// stale "apply?/reject?" can't later be confirmed by a reflexive
+    /// keypress on a screen the reviewer thinks is idle.
+    pub fn cancel_confirm(&mut self) {
+        if matches!(self.mode, Mode::Confirm(_)) {
+            self.mode = Mode::Browse;
+        }
+    }
+
     pub fn set_flash(&mut self, flash: Flash) {
         self.flash = Some(flash);
     }
@@ -374,6 +354,7 @@ impl ReviewApp {
 
 #[cfg(test)]
 mod tests {
+    use super::super::common::FlashLevel;
     use super::*;
 
     fn prop(id: &str, status: ProposalStatus) -> Proposal {
@@ -468,18 +449,45 @@ mod tests {
     }
 
     #[test]
-    fn quit_from_browse_and_help() {
+    fn confirm_overlay_is_modal_so_the_shell_yields_all_keys() {
         let mut app = three();
-        assert_eq!(app.update(Msg::Quit), Action::Quit);
-        app.update(Msg::ToggleHelp);
-        assert_eq!(app.mode(), &Mode::Help);
-        assert_eq!(app.update(Msg::Quit), Action::Quit);
+        assert!(!app.is_modal(), "browse is not modal");
+        app.update(Msg::RequestApply);
+        assert!(app.is_modal(), "a confirm overlay captures keys");
+        app.update(Msg::Cancel);
+        assert!(!app.is_modal(), "cancel returns to browse");
     }
 
     #[test]
     fn refresh_asks_the_loop_to_reload() {
         let mut app = three();
         assert_eq!(app.update(Msg::Refresh), Action::Reload);
+    }
+
+    #[test]
+    fn select_by_id_jumps_to_a_freshly_filed_proposal() {
+        // A generated digest sorts last by ULID; selection must seek it, not
+        // assume index 0 (the regression the adversarial review caught).
+        let mut app = three();
+        assert_eq!(app.selected(), 0);
+        app.select_by_id("01CCC");
+        assert_eq!(app.selected(), 2);
+        assert_eq!(app.selected_id(), Some("01CCC"));
+        // An id not visible under the current filter is a no-op, not a panic.
+        app.select_by_id("nope");
+        assert_eq!(app.selected(), 2);
+    }
+
+    #[test]
+    fn cancel_confirm_dismisses_a_pending_overlay() {
+        let mut app = three();
+        app.update(Msg::RequestApply);
+        assert!(app.is_modal());
+        app.cancel_confirm();
+        assert!(!app.is_modal(), "tabbing away cancels the confirm");
+        // Idempotent when there is nothing to cancel.
+        app.cancel_confirm();
+        assert!(!app.is_modal());
     }
 
     #[test]

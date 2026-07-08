@@ -175,8 +175,8 @@ Clone the pair with `curator zotero sync` (e.g. every 4 hours) and
 digest proposal only when the
 [auto-apply gate](concepts.md#proposals-the-only-write-path) admits it;
 everything else waits in the queue for `curator review` — run with no id, it
-opens an interactive reviewer (diff + pre-flight drift check, apply/reject with
-confirm) over the whole queue.
+opens the interactive TUI (Review · Search · Digest) whose Review screen walks
+the queue (diff + pre-flight drift check, apply/reject with confirm).
 
 ### Watching it
 

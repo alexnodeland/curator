@@ -30,10 +30,12 @@ check the rendered diagrams on every page that has a mermaid fence.
   pages that contain a mermaid fence.
 - `demo.svg` — a hand-authored terminal-session mockup (init → search →
   digest → status) used as the hero on the site and the README.
-- `review.svg` — a hand-authored, lightly-stylised depiction of the
-  `curator review` TUI: the two-pane layout, status glyphs, pre-flight
-  banner, coloured diff, and footer key hints are drawn to match
-  `crates/curator-cli/src/tui/{view,diff}.rs`. It is a mockup, not a
-  captured render — **keep it in sync by hand** when that layout, the
-  glyphs/colours, or the footer hint string change (the context-sweep
-  convention).
+- `review.svg`, `search.svg`, `digest.svg` — hand-authored, lightly-stylised
+  depictions of the three screens of the `curator review` TUI (the tabbed
+  Review · Search · Digest app). The tab bar, panes, status glyphs, scores,
+  pre-flight banner, coloured diff, and footer hint strings are drawn to match
+  `crates/curator-cli/src/tui/{shell,view,diff,search,digest}.rs`, and were
+  checked against real frames captured from the running binary. They are
+  mockups, not captured renders — **keep them in sync by hand** when a
+  screen's layout, glyphs/colours, or footer hint strings change (the
+  context-sweep convention).

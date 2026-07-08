@@ -1,55 +1,88 @@
-//! `curator review` — the interactive proposal reviewer.
+//! `curator review` — the interactive terminal UI.
 //!
-//! A thin adapter around the pure [`app`] reducer: init the terminal, load
-//! the proposal queue, then loop { draw; read a key → [`app::Msg`];
-//! `app.update` → run the returned [`app::Action`] against the librarian }.
-//! All behaviour lives in [`app`]; this file only touches the terminal and
-//! the vault/librarian, so it stays effectively logic-free (and untested).
+//! A tabbed shell over three screens: **Review** (the `proposals/v1` queue —
+//! diff, pre-flight drift check, apply/reject), **Search** (interactive
+//! hybrid retrieval over the same `KpEngine` the MCP surface rides), and
+//! **Digest** (a read-only preview of what the deterministic librarian would
+//! surface, with one-key generate).
+//!
+//! Every screen is a pure reducer ([`app`], [`search`], [`digest`]) with no
+//! terminal and no I/O. This file is the only effectful layer: it owns the
+//! terminal, decodes key events into each screen's message alphabet, and runs
+//! the returned actions against the vault / engine / librarian. The index and
+//! embedder are built **lazily** — a review-only session never opens them, so
+//! `curator review` stays as fast to start as it was before Search and Digest
+//! existed.
 
 mod app;
+mod common;
 mod diff;
+mod digest;
+mod search;
+mod shell;
 mod view;
 
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use curator_core::{Proposal, ProposalStatus, Vault};
-use curator_librarian::{ApplyError, FilePatch, RejectError};
+use curator_core::{KpConfig, Proposal, ProposalStatus, Vault};
+use curator_index::{Embedder, embedder_from_config};
+use curator_librarian::{ApplyError, DigestPreview, FilePatch, RejectError};
+use curator_mcp::KpEngine;
+use curator_mcp::types::{HitOutput, NoteOutput, SearchMode};
 
-use app::{Action, Flash, Loaded, Mode, Msg, Preflight, ReviewApp, short_id};
+use app::{Loaded, Preflight, ReviewApp, short_id};
+use common::Flash;
+use digest::DigestApp;
+use shell::{GlobalMsg, Shell, Tab};
 
-/// Launch the reviewer over the vault's proposal queue. Returns when the
-/// user quits (or on a terminal I/O error). The terminal is always
-/// restored — `ratatui::init` also installs a panic hook that restores it,
-/// so a panic mid-draw won't wedge the user's shell.
-pub fn run_review(vault: &Vault, proposals_dir: &str) -> Result<(), String> {
+/// Result rows fetched per interactive search.
+const SEARCH_K: u32 = 20;
+/// Body characters shown in a digest candidate preview.
+const DIGEST_PREVIEW_CHARS: usize = 240;
+
+/// Launch the reviewer over the vault's proposal queue. Returns when the user
+/// quits (or on a terminal I/O error). The terminal is always restored —
+/// `ratatui::init` installs a panic hook that restores it too, so a panic
+/// mid-draw won't wedge the user's shell.
+pub fn run_review(config: &KpConfig) -> Result<(), String> {
+    let vault = Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    let proposals_dir = config.vault.proposals_dir.clone();
     let proposals =
-        curator_core::list_proposals(vault, proposals_dir).map_err(|e| e.to_string())?;
+        curator_core::list_proposals(&vault, &proposals_dir).map_err(|e| e.to_string())?;
+    let mut shell = Shell::new(ReviewApp::new(proposals));
+
     let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, vault, proposals_dir, proposals);
+    let result = event_loop(&mut terminal, &mut shell, config, &vault, &proposals_dir);
     ratatui::restore();
     result
 }
 
 fn event_loop(
     terminal: &mut DefaultTerminal,
+    shell: &mut Shell,
+    config: &KpConfig,
     vault: &Vault,
     proposals_dir: &str,
-    proposals: Vec<Proposal>,
 ) -> Result<(), String> {
-    let mut app = ReviewApp::new(proposals);
+    // Review detail (parsed patch + pre-flight), reloaded when the selection
+    // changes — held here, outside the pure reducer.
     let mut loaded: Option<Loaded> = None;
     let mut loaded_id: Option<String> = None;
 
+    // Lazily-built index-backed resources: only opened on first use.
+    let mut engine: Option<KpEngine> = None;
+    let mut embedder: Option<Box<dyn Embedder>> = None;
+
     loop {
-        // Refresh the detail pane whenever the selection changes.
-        let sel = app.selected_id().map(str::to_owned);
+        // Refresh the Review detail pane whenever its selection changes.
+        let sel = shell.review.selected_id().map(str::to_owned);
         if sel != loaded_id {
             loaded = match sel.as_deref() {
                 Some(id) => match load_detail(vault, proposals_dir, id) {
                     Ok(l) => Some(l),
                     Err(e) => {
-                        app.set_flash(Flash::warn(e));
+                        shell.review.set_flash(Flash::warn(e));
                         None
                     }
                 },
@@ -59,7 +92,7 @@ fn event_loop(
         }
 
         terminal
-            .draw(|f| view::render(f, &app, loaded.as_ref()))
+            .draw(|f| shell::render(f, shell, loaded.as_ref()))
             .map_err(|e| e.to_string())?;
 
         let Event::Key(key) = event::read().map_err(|e| e.to_string())? else {
@@ -68,50 +101,419 @@ fn event_loop(
         if key.kind != KeyEventKind::Press {
             continue; // ignore key-release / repeat on platforms that send them
         }
-        let Some(msg) = decode_key(key, app.mode()) else {
-            continue;
-        };
 
-        match app.update(msg) {
-            Action::None => {}
-            Action::Quit => break,
-            Action::Reload => {
-                reload(&mut app, vault, proposals_dir)?;
-                loaded_id = None;
+        // The help overlay swallows the next key press.
+        if shell.help {
+            shell.help = false;
+            continue;
+        }
+
+        // Global routing first (tab switch / quit / help).
+        if let Some(g) = shell::decode_global(key, shell.active, shell.active_is_modal()) {
+            match g {
+                GlobalMsg::Quit => break,
+                GlobalMsg::ToggleHelp => shell.help = true,
+                GlobalMsg::Switch(tab) => {
+                    // Leaving a screen abandons any armed confirm overlay, so a
+                    // stale apply/reject/generate can't be confirmed on return.
+                    shell.review.cancel_confirm();
+                    shell.digest.cancel_confirm();
+                    shell.active = tab;
+                    if tab == Tab::Digest && !shell.digest.is_loaded() {
+                        load_digest(shell, &mut embedder, config);
+                    }
+                }
             }
-            Action::Apply(id) => {
-                let flash = match curator_librarian::apply_proposal(vault, proposals_dir, &id) {
-                    Ok(report) => Flash::success(format!(
-                        "applied {} — {} file(s) written",
-                        short_id(&report.id),
-                        report.files_written.len()
-                    )),
-                    Err(e) => apply_error_flash(&e),
-                };
-                app.set_flash(flash);
-                reload(&mut app, vault, proposals_dir)?;
-                loaded_id = None;
-            }
-            Action::Reject(id) => {
-                let flash = match curator_librarian::reject_proposal(vault, proposals_dir, &id) {
-                    Ok(p) => Flash::success(format!("rejected {} — {}", short_id(&p.id), p.title)),
-                    Err(e) => reject_error_flash(&e),
-                };
-                app.set_flash(flash);
-                reload(&mut app, vault, proposals_dir)?;
-                loaded_id = None;
+            continue;
+        }
+
+        // Otherwise the key belongs to the active screen.
+        match shell.active {
+            Tab::Review => handle_review(key, shell, vault, proposals_dir, &mut loaded_id)?,
+            Tab::Search => handle_search(key, shell, config, &mut engine),
+            Tab::Digest => handle_digest(
+                key,
+                shell,
+                config,
+                vault,
+                proposals_dir,
+                &mut embedder,
+                &mut loaded_id,
+            )?,
+        }
+    }
+    Ok(())
+}
+
+// --- Review screen effects ---
+
+fn handle_review(
+    key: KeyEvent,
+    shell: &mut Shell,
+    vault: &Vault,
+    proposals_dir: &str,
+    loaded_id: &mut Option<String>,
+) -> Result<(), String> {
+    let Some(msg) = decode_review(key, shell.review.is_modal()) else {
+        return Ok(());
+    };
+    match shell.review.update(msg) {
+        app::Action::None => {}
+        app::Action::Reload => {
+            reload_review(&mut shell.review, vault, proposals_dir)?;
+            *loaded_id = None;
+        }
+        app::Action::Apply(id) => {
+            let flash = match curator_librarian::apply_proposal(vault, proposals_dir, &id) {
+                Ok(report) => Flash::success(format!(
+                    "applied {} — {} file(s) written",
+                    short_id(&report.id),
+                    report.files_written.len()
+                )),
+                Err(e) => apply_error_flash(&e),
+            };
+            shell.review.set_flash(flash);
+            reload_review(&mut shell.review, vault, proposals_dir)?;
+            *loaded_id = None;
+        }
+        app::Action::Reject(id) => {
+            let flash = match curator_librarian::reject_proposal(vault, proposals_dir, &id) {
+                Ok(p) => Flash::success(format!("rejected {} — {}", short_id(&p.id), p.title)),
+                Err(e) => reject_error_flash(&e),
+            };
+            shell.review.set_flash(flash);
+            reload_review(&mut shell.review, vault, proposals_dir)?;
+            *loaded_id = None;
+        }
+    }
+    Ok(())
+}
+
+fn reload_review(review: &mut ReviewApp, vault: &Vault, proposals_dir: &str) -> Result<(), String> {
+    let proposals =
+        curator_core::list_proposals(vault, proposals_dir).map_err(|e| e.to_string())?;
+    review.reload(proposals);
+    Ok(())
+}
+
+// --- Search screen effects ---
+
+fn handle_search(
+    key: KeyEvent,
+    shell: &mut Shell,
+    config: &KpConfig,
+    engine: &mut Option<KpEngine>,
+) {
+    let Some(msg) = decode_search(key, shell.search.is_typing()) else {
+        return;
+    };
+    match shell.search.update(msg) {
+        search::Action::None => {}
+        search::Action::Search(query, mode) => match lazy_engine(engine, config) {
+            Ok(eng) => match eng.search(&query, Some(SEARCH_K), Some(to_search_mode(mode))) {
+                Ok(out) => {
+                    let n = out.results.len();
+                    let status = if n == 0 {
+                        format!("no hits · {}", mode.label())
+                    } else {
+                        format!("{n} hits · {}", mode.label())
+                    };
+                    shell.search.set_results(map_hits(out.results), status);
+                }
+                Err(e) => shell
+                    .search
+                    .set_flash(Flash::error(format!("search failed: {e}"))),
+            },
+            Err(e) => shell
+                .search
+                .set_flash(Flash::error(format!("index unavailable: {e}"))),
+        },
+        search::Action::Open(id) => match lazy_engine(engine, config) {
+            Ok(eng) => match eng.get_note(&id) {
+                Ok(note) => shell.search.set_opened(map_note(note)),
+                Err(e) => shell
+                    .search
+                    .set_flash(Flash::error(format!("open failed: {e}"))),
+            },
+            Err(e) => shell
+                .search
+                .set_flash(Flash::error(format!("index unavailable: {e}"))),
+        },
+        search::Action::Related(id) => match lazy_engine(engine, config) {
+            Ok(eng) => match eng.related(&id, Some(SEARCH_K)) {
+                Ok(out) => {
+                    let n = out.results.len();
+                    let status = format!("related · {n} note(s)");
+                    shell.search.set_results(map_hits(out.results), status);
+                }
+                Err(e) => shell
+                    .search
+                    .set_flash(Flash::error(format!("related failed: {e}"))),
+            },
+            Err(e) => shell
+                .search
+                .set_flash(Flash::error(format!("index unavailable: {e}"))),
+        },
+    }
+}
+
+// --- Digest screen effects ---
+
+fn handle_digest(
+    key: KeyEvent,
+    shell: &mut Shell,
+    config: &KpConfig,
+    vault: &Vault,
+    proposals_dir: &str,
+    embedder: &mut Option<Box<dyn Embedder>>,
+    loaded_id: &mut Option<String>,
+) -> Result<(), String> {
+    let Some(msg) = decode_digest(key, shell.digest.is_modal()) else {
+        return Ok(());
+    };
+    match shell.digest.update(msg) {
+        digest::Action::None => {}
+        digest::Action::Reload => load_digest(shell, embedder, config),
+        digest::Action::Generate => {
+            generate_digest(shell, config, vault, proposals_dir, embedder, loaded_id)?;
+        }
+    }
+    Ok(())
+}
+
+/// Build (or refresh) the digest preview from the index.
+fn load_digest(shell: &mut Shell, embedder: &mut Option<Box<dyn Embedder>>, config: &KpConfig) {
+    let now = curator_core::time::unix_now();
+    match lazy_embedder(embedder, config) {
+        Ok(emb) => match curator_librarian::preview_digest(config, emb, now) {
+            Ok(preview) => shell.digest.set_preview(map_preview(preview)),
+            Err(e) => shell
+                .digest
+                .set_flash(Flash::error(format!("digest preview failed: {e}"))),
+        },
+        Err(e) => shell
+            .digest
+            .set_flash(Flash::error(format!("index unavailable: {e}"))),
+    }
+}
+
+/// File today's digest as a proposal, then jump to the Review tab to review it.
+fn generate_digest(
+    shell: &mut Shell,
+    config: &KpConfig,
+    vault: &Vault,
+    proposals_dir: &str,
+    embedder: &mut Option<Box<dyn Embedder>>,
+    loaded_id: &mut Option<String>,
+) -> Result<(), String> {
+    let now = curator_core::time::unix_now();
+    let outcome = match lazy_embedder(embedder, config) {
+        Ok(emb) => curator_librarian::run_digest(config, emb, now, false)
+            .map_err(|e| format!("generate failed: {e}")),
+        Err(e) => Err(format!("index unavailable: {e}")),
+    };
+    match outcome {
+        Err(e) => shell.digest.set_flash(Flash::error(e)),
+        Ok(report) => {
+            if let Some(reason) = report.skipped {
+                shell.digest.set_flash(Flash::warn(reason));
+            } else {
+                reload_review(&mut shell.review, vault, proposals_dir)?;
+                let pid = report.proposal_id.as_deref().unwrap_or("");
+                // Jump to the freshly-filed proposal: it sorts LAST by ULID,
+                // so seek it by id rather than leaving the old selection. Also
+                // clear any stale Review confirm before landing there.
+                shell.review.cancel_confirm();
+                shell.review.select_by_id(pid);
+                shell.review.set_flash(Flash::success(format!(
+                    "digest filed as proposal {} — review it",
+                    short_id(pid)
+                )));
+                shell.active = Tab::Review;
+                *loaded_id = None;
+                // The preview is stale (a digest now exists) — drop it so the
+                // next Digest visit reloads and reports already-generated.
+                shell.digest = DigestApp::default();
             }
         }
     }
     Ok(())
 }
 
-fn reload(app: &mut ReviewApp, vault: &Vault, proposals_dir: &str) -> Result<(), String> {
-    let proposals =
-        curator_core::list_proposals(vault, proposals_dir).map_err(|e| e.to_string())?;
-    app.reload(proposals);
-    Ok(())
+// --- lazy index-backed resources ---
+
+fn lazy_engine<'a>(
+    cache: &'a mut Option<KpEngine>,
+    config: &KpConfig,
+) -> Result<&'a KpEngine, String> {
+    if cache.is_none() {
+        *cache = Some(KpEngine::from_config(config.clone()).map_err(|e| e.to_string())?);
+    }
+    Ok(cache.as_ref().expect("just populated"))
 }
+
+fn lazy_embedder<'a>(
+    cache: &'a mut Option<Box<dyn Embedder>>,
+    config: &KpConfig,
+) -> Result<&'a dyn Embedder, String> {
+    if cache.is_none() {
+        *cache = Some(embedder_from_config(config).map_err(|e| e.to_string())?);
+    }
+    Ok(cache.as_deref().expect("just populated"))
+}
+
+// --- engine/librarian → screen type mappings ---
+
+fn to_search_mode(mode: search::Mode) -> SearchMode {
+    match mode {
+        search::Mode::Hybrid => SearchMode::Hybrid,
+        search::Mode::Vector => SearchMode::Vector,
+        search::Mode::Fts => SearchMode::Fts,
+    }
+}
+
+fn map_hits(hits: Vec<HitOutput>) -> Vec<search::Hit> {
+    hits.into_iter()
+        .map(|h| search::Hit {
+            score: h.score,
+            id: h.id,
+            title: h.title,
+            path: h.path,
+            snippet: h.snippet,
+        })
+        .collect()
+}
+
+fn map_note(note: NoteOutput) -> search::OpenedNote {
+    search::OpenedNote {
+        id: note.id,
+        title: note.title,
+        path: note.path,
+        tags: note.frontmatter.tags,
+        source: note.frontmatter.source,
+        ingested_at: note.index.ingested_at,
+        content: note.content,
+    }
+}
+
+fn map_preview(preview: DigestPreview) -> digest::Preview {
+    let DigestPreview {
+        date,
+        note_path,
+        candidates,
+        ranked,
+        surfaced,
+        quiet,
+        warnings,
+        already_exists,
+        ..
+    } = preview;
+    let rows = ranked
+        .into_iter()
+        .filter_map(|r| {
+            let c = candidates.get(r.index)?;
+            Some(digest::Row {
+                title: c.title.clone(),
+                path: c.path.clone(),
+                tags: c.tags.clone(),
+                source: c.source.clone(),
+                score: r.score,
+                similarity: r.similarity,
+                age_days: r.age_days,
+                why: r.why,
+                surfaced: r.surfaced,
+                preview: curator_librarian::extractive_summary(&c.body, DIGEST_PREVIEW_CHARS),
+            })
+        })
+        .collect();
+    digest::Preview {
+        date,
+        note_path,
+        rows,
+        surfaced,
+        quiet,
+        warnings,
+        already_exists,
+    }
+}
+
+// --- key decoders (raw key → each screen's Msg) ---
+
+fn decode_review(key: KeyEvent, confirm: bool) -> Option<app::Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if confirm {
+        return match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(app::Msg::Confirm),
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(app::Msg::Cancel),
+            _ => None,
+        };
+    }
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(app::Msg::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(app::Msg::Up),
+        KeyCode::Char('d') if ctrl => Some(app::Msg::ScrollDown),
+        KeyCode::Char('u') if ctrl => Some(app::Msg::ScrollUp),
+        KeyCode::PageDown => Some(app::Msg::ScrollDown),
+        KeyCode::PageUp => Some(app::Msg::ScrollUp),
+        KeyCode::Char('f') => Some(app::Msg::CycleFilter),
+        KeyCode::Char('a') => Some(app::Msg::RequestApply),
+        KeyCode::Char('x') => Some(app::Msg::RequestReject),
+        KeyCode::Char('r') => Some(app::Msg::Refresh),
+        _ => None,
+    }
+}
+
+fn decode_search(key: KeyEvent, typing: bool) -> Option<search::Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if typing {
+        return match key.code {
+            KeyCode::Char(c) if !ctrl => Some(search::Msg::Char(c)),
+            KeyCode::Backspace => Some(search::Msg::Backspace),
+            KeyCode::Enter => Some(search::Msg::Submit),
+            KeyCode::Esc => Some(search::Msg::Blur),
+            _ => None,
+        };
+    }
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(search::Msg::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(search::Msg::Up),
+        KeyCode::Char('d') if ctrl => Some(search::Msg::ScrollDown),
+        KeyCode::Char('u') if ctrl => Some(search::Msg::ScrollUp),
+        KeyCode::PageDown => Some(search::Msg::ScrollDown),
+        KeyCode::PageUp => Some(search::Msg::ScrollUp),
+        KeyCode::Char('o') | KeyCode::Enter => Some(search::Msg::Open),
+        KeyCode::Char('r') => Some(search::Msg::Related),
+        KeyCode::Char('m') => Some(search::Msg::CycleMode),
+        KeyCode::Char('/' | 'i') => Some(search::Msg::FocusQuery),
+        KeyCode::Esc => Some(search::Msg::Blur),
+        _ => None,
+    }
+}
+
+fn decode_digest(key: KeyEvent, confirm: bool) -> Option<digest::Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if confirm {
+        return match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(digest::Msg::Confirm),
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(digest::Msg::Cancel),
+            _ => None,
+        };
+    }
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(digest::Msg::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(digest::Msg::Up),
+        KeyCode::Char('d') if ctrl => Some(digest::Msg::ScrollDown),
+        KeyCode::Char('u') if ctrl => Some(digest::Msg::ScrollUp),
+        KeyCode::PageDown => Some(digest::Msg::ScrollDown),
+        KeyCode::PageUp => Some(digest::Msg::ScrollUp),
+        KeyCode::Char('f') => Some(digest::Msg::CycleFilter),
+        KeyCode::Char('g') => Some(digest::Msg::RequestGenerate),
+        KeyCode::Char('r') => Some(digest::Msg::Refresh),
+        _ => None,
+    }
+}
+
+// --- Review detail loading + pre-flight (unchanged behavior) ---
 
 /// Load one proposal's patch, parse it, and compute the pre-flight verdict.
 fn load_detail(vault: &Vault, proposals_dir: &str, id: &str) -> Result<Loaded, String> {
@@ -202,38 +604,6 @@ fn preflight(
                 trouble.join("; ")
             )),
         }
-    }
-}
-
-/// Map a key press to a [`Msg`], mode-dependent. Returns `None` for keys
-/// the current mode ignores.
-fn decode_key(key: KeyEvent, mode: &Mode) -> Option<Msg> {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    match mode {
-        Mode::Confirm(_) => match key.code {
-            KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(Msg::Confirm),
-            KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Msg::Cancel),
-            _ => None,
-        },
-        Mode::Help => match key.code {
-            KeyCode::Char('q') => Some(Msg::Quit),
-            _ => Some(Msg::ToggleHelp), // any other key dismisses
-        },
-        Mode::Browse => match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => Some(Msg::Quit),
-            KeyCode::Char('j') | KeyCode::Down => Some(Msg::Down),
-            KeyCode::Char('k') | KeyCode::Up => Some(Msg::Up),
-            KeyCode::Char('d') if ctrl => Some(Msg::ScrollDown),
-            KeyCode::Char('u') if ctrl => Some(Msg::ScrollUp),
-            KeyCode::PageDown => Some(Msg::ScrollDown),
-            KeyCode::PageUp => Some(Msg::ScrollUp),
-            KeyCode::Char('f') => Some(Msg::CycleFilter),
-            KeyCode::Char('a') => Some(Msg::RequestApply),
-            KeyCode::Char('x') => Some(Msg::RequestReject),
-            KeyCode::Char('r') => Some(Msg::Refresh),
-            KeyCode::Char('?') => Some(Msg::ToggleHelp),
-            _ => None,
-        },
     }
 }
 
