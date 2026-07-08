@@ -113,6 +113,50 @@ pub fn apply_proposal(
     }
 }
 
+/// Errors from [`reject_proposal`].
+#[derive(Debug, thiserror::Error)]
+pub enum RejectError {
+    /// The proposal is not `open` — transitions are one-way, so there is
+    /// nothing to reject.
+    #[error("proposal {id} is already {status}")]
+    NotOpen { id: String, status: String },
+    /// Reading/updating the stored proposal failed (environment — nothing
+    /// was stamped).
+    #[error(transparent)]
+    Store(#[from] ProposalStoreError),
+}
+
+/// Reject an `open` proposal by human decision — stamp `rejected` *without*
+/// attempting to apply it. This is the reviewer saying "no" up front, as
+/// distinct from a *failed* [`apply_proposal`] (which also stamps
+/// `rejected`, but only after the validator refuses). No files are touched.
+///
+/// Mirrors [`apply_proposal`]'s one-way guard: only an `open` proposal can
+/// be rejected — `applied`/`rejected` are terminal, so a non-open proposal
+/// returns [`RejectError::NotOpen`] and is left exactly as it was. (The
+/// lower-level [`store_proposal_status`] has no such guard; this is the safe
+/// verb to wire a UI button to.)
+pub fn reject_proposal(
+    vault: &Vault,
+    proposals_dir: &str,
+    id: &str,
+) -> Result<Proposal, RejectError> {
+    let (mut proposal, _patch) = load_proposal(vault, proposals_dir, id)?;
+    if proposal.status != ProposalStatus::Open {
+        return Err(RejectError::NotOpen {
+            id: id.to_owned(),
+            status: status_str(proposal.status).to_owned(),
+        });
+    }
+    store_proposal_status(
+        vault,
+        proposals_dir,
+        &mut proposal,
+        ProposalStatus::Rejected,
+    )?;
+    Ok(proposal)
+}
+
 /// One validated write, staged in memory: the target path, its complete
 /// new content, and the file's prior content (`None` = the patch creates
 /// it) — enough to revert if a later write in the same apply fails.
@@ -412,6 +456,38 @@ mod tests {
         // And a rejected proposal cannot be applied later.
         let err = apply_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
         assert!(matches!(err, ApplyError::NotOpen { .. }));
+    }
+
+    #[test]
+    fn reject_stamps_an_open_proposal_without_touching_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        let p = propose(&vault, &[("new/idea.md", "# Idea\n")]);
+
+        let rejected = reject_proposal(&vault, ".kp/proposals", &p.id).expect("rejects");
+        assert_eq!(rejected.status, ProposalStatus::Rejected);
+        let listed = list_proposals(&vault, ".kp/proposals").expect("lists");
+        assert_eq!(listed[0].status, ProposalStatus::Rejected);
+        // Reject never applies — the target file was not written.
+        assert!(vault.read("new/idea.md").is_err());
+        // And a rejected proposal cannot then be applied (one-way).
+        let err = apply_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
+        assert!(matches!(err, ApplyError::NotOpen { .. }));
+    }
+
+    #[test]
+    fn reject_refuses_a_non_open_proposal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = tmp_vault(dir.path());
+        vault.write_atomic("n.md", "one\ntwo\n").expect("seed");
+        let p = propose(&vault, &[("n.md", "one\n2\n")]);
+        apply_proposal(&vault, ".kp/proposals", &p.id).expect("applies");
+
+        // Already applied → reject is refused and the status is unchanged.
+        let err = reject_proposal(&vault, ".kp/proposals", &p.id).unwrap_err();
+        assert!(matches!(err, RejectError::NotOpen { ref status, .. } if status == "applied"));
+        let listed = list_proposals(&vault, ".kp/proposals").expect("lists");
+        assert_eq!(listed[0].status, ProposalStatus::Applied);
     }
 
     /// A hand-crafted proposal dir (an agent writing files directly,

@@ -76,6 +76,11 @@ similar = "3"
 # xtask only: markdown -> HTML for the deterministic docs-site generator
 # (`xtask docs`). default-features = false keeps just the html renderer.
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+# Terminal UI for `curator review` (the interactive proposal reviewer).
+# ratatui re-exports the exact crossterm it is built against
+# (`ratatui::crossterm`), so we depend on ratatui ALONE and sidestep any
+# backend version-skew between the widgets and the event/terminal layer.
+ratatui = "0.29"
 
 # Dev-only.
 proptest = "1"

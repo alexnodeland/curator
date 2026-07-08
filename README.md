@@ -129,8 +129,8 @@ Copy [`curator.example.toml`](curator.example.toml) to `curator.toml` (the
 legacy `kp.toml` name is still accepted) and point `[vault].path` at your
 markdown directory — or let `curator init` scaffold one. `curator --help`
 lists the surface: ingest, index rebuild, Zotero sync, search / get / related /
-recent, `mcp serve`, propose / review / apply, the librarian digest, doctor,
-and status. (Pre-release: APIs are still settling — `docs/design/` is the
+recent, `mcp serve`, propose / review / apply / reject (`curator review` with no
+id opens an interactive reviewer), the librarian digest, doctor, and status. (Pre-release: APIs are still settling — `docs/design/` is the
 design record.)
 
 For development: `just` lists the front door (`just ci` = exactly what CI
