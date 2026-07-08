@@ -29,5 +29,8 @@ pub mod uuid7;
 
 pub use digest::{DigestError, DigestReport, run_digest};
 pub use patch::{FilePatch, Hunk, HunkLine, PatchError, apply_file_patch, parse_patch};
-pub use proposals::{ApplyError, ApplyReport, apply_proposal, auto_applicable, render_review};
+pub use proposals::{
+    ApplyError, ApplyReport, RejectError, apply_proposal, auto_applicable, reject_proposal,
+    render_review,
+};
 pub use uuid7::{is_uuid7, mint_uuid7};

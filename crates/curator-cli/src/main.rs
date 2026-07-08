@@ -1,5 +1,6 @@
 //! `curator` — the Knowledge Plane CLI.
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -8,6 +9,8 @@ use curator_core::KpConfig;
 use curator_index::{Embedder, embedder_from_config};
 use curator_mcp::KpEngine;
 use curator_mcp::types::{NoteKind, SearchMode};
+
+mod tui;
 
 const USAGE: &str = "curator — the Knowledge Plane
 
@@ -25,8 +28,9 @@ Commands:
   recent          recently ingested/changed notes
   mcp serve       serve the MCP surface (stdio default; --http + bearer)
   propose         create a proposals/v1 changeset from a directory of files
-  review <id>     render a proposal for human review
+  review [<id>]   interactive proposal reviewer (no id), or render one proposal
   apply <id>      validate and apply a proposal (stamps applied/rejected)
+  reject <id>     reject an open proposal without applying it (stamps rejected)
   proposals list  list stored proposals and their status
   digest run      run the deterministic librarian digest (--auto to apply)
   doctor          config / vault / index / cursors health
@@ -149,6 +153,7 @@ fn main() -> ExitCode {
         Some("propose") => run_or_fail(cmd_propose(&args[1..])),
         Some("review") => run_or_fail(cmd_review(&args[1..])),
         Some("apply") => run_or_fail(cmd_apply(&args[1..])),
+        Some("reject") => run_or_fail(cmd_reject(&args[1..])),
         Some("proposals") => match args.get(1).map(String::as_str) {
             Some("list") => run_or_fail(cmd_proposals_list(&args[2..])),
             other => {
@@ -731,14 +736,50 @@ fn collect_proposal_files(dir: &Path) -> Result<Vec<curator_core::ProposalFile>,
 
 fn cmd_review(args: &[String]) -> Result<(), String> {
     let q = parse_query_args(args)?;
+    let config = load_config(q.config_path)?;
+    let vault = curator_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    match q.positional.as_slice() {
+        // No id → the interactive reviewer over the whole proposal queue.
+        // Guard on a real terminal so a piped/scripted `curator review`
+        // (e.g. in CI) never blocks on `event::read()` — it prints guidance
+        // and exits cleanly instead.
+        [] => {
+            if !std::io::stdout().is_terminal() {
+                println!(
+                    "curator review: no proposal id given and stdout is not a terminal.\n\
+                     Pass an id to render one proposal non-interactively \
+                     (`curator review <id>`), or run in a terminal for the \
+                     interactive reviewer."
+                );
+                return Ok(());
+            }
+            tui::run_review(&vault, &config.vault.proposals_dir)
+        }
+        // One id → the original non-interactive render (unchanged, scriptable).
+        [id] => {
+            let (proposal, patch) =
+                curator_core::load_proposal(&vault, &config.vault.proposals_dir, id)
+                    .map_err(|e| e.to_string())?;
+            print!("{}", curator_librarian::render_review(&proposal, &patch));
+            Ok(())
+        }
+        _ => Err("review takes at most one id — `curator review [<id>]`".to_owned()),
+    }
+}
+
+fn cmd_reject(args: &[String]) -> Result<(), String> {
+    let q = parse_query_args(args)?;
     let [id] = q.positional.as_slice() else {
-        return Err("review needs exactly one id — `curator review <id>`".to_owned());
+        return Err("reject needs exactly one id — `curator reject <id>`".to_owned());
     };
     let config = load_config(q.config_path)?;
     let vault = curator_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
-    let (proposal, patch) = curator_core::load_proposal(&vault, &config.vault.proposals_dir, id)
+    let proposal = curator_librarian::reject_proposal(&vault, &config.vault.proposals_dir, id)
         .map_err(|e| e.to_string())?;
-    print!("{}", curator_librarian::render_review(&proposal, &patch));
+    if q.json {
+        return print_json(&proposal);
+    }
+    println!("rejected {} ({})", proposal.id, proposal.title);
     Ok(())
 }
 

@@ -22,9 +22,10 @@ text, expanded. Every command exits `0` on success, `1` on failure
 | [`recent`](#curator-recent) | recently ingested/changed notes |
 | [`mcp serve`](#curator-mcp-serve) | serve the MCP surface (stdio default; `--http` + bearer) |
 | [`propose`](#curator-propose) | create a `proposals/v1` changeset from a directory of files |
-| [`review <id>`](#curator-review-apply-proposals-list) | render a proposal for human review |
-| [`apply <id>`](#curator-review-apply-proposals-list) | validate and apply a proposal (stamps applied/rejected) |
-| [`proposals list`](#curator-review-apply-proposals-list) | list stored proposals and their status |
+| [`review [<id>]`](#curator-review-apply-reject-proposals-list) | interactive proposal reviewer (no id), or render one proposal |
+| [`apply <id>`](#curator-review-apply-reject-proposals-list) | validate and apply a proposal (stamps applied/rejected) |
+| [`reject <id>`](#curator-review-apply-reject-proposals-list) | reject an open proposal without applying it (stamps rejected) |
+| [`proposals list`](#curator-review-apply-reject-proposals-list) | list stored proposals and their status |
 | [`digest run`](#curator-digest-run) | run the deterministic librarian digest (`--auto` to apply) |
 | [`doctor`](#curator-doctor) | config / vault / index / cursors health |
 | [`status`](#curator-status) | vault + index + proposals snapshot (always succeeds; `--json`) |
@@ -160,17 +161,41 @@ curator propose --title <t> --from <dir>
 Generated-content is the only creation mode in v1; a staged-changes
 mode (diffing working-tree edits) is planned, not yet implemented.
 
-## `curator review` / `apply` / `proposals list`
+## `curator review` / `apply` / `reject` / `proposals list`
 
 ```sh
-curator review <id>       # human-readable render of the changeset
+curator review            # interactive reviewer over the whole queue (a TTY)
+curator review <id>       # human-readable render of one changeset (scriptable)
 curator apply <id>        # validate -> apply -> stamp status
+curator reject <id>       # stamp an open proposal rejected, writing nothing
 curator proposals list    # ids, status, titles, file counts
 ```
 
 `apply` runs the deterministic validator
 ([hard-reject list](../concepts.md#proposals-the-only-write-path))
-and stamps `applied`/`rejected`.
+and stamps `applied`/`rejected`. A *failed* apply also stamps `rejected`;
+`reject` is the reviewer saying "no" up front — same one-way guard (only an
+`open` proposal can be rejected), but nothing is written.
+
+**The interactive reviewer.** `curator review` with no id and a terminal opens
+a full-screen reviewer: the proposal queue on the left, the selected
+changeset's metadata + a coloured diff on the right, and a **pre-flight**
+banner that checks — non-destructively — whether the patch still applies
+cleanly against the current vault, so drift is visible *before* you commit
+(apply is destructive-on-reject). Apply and reject both ask to confirm.
+
+| key | action |
+|---|---|
+| `j` / `k`, `↑` / `↓` | move between proposals |
+| `Ctrl-d` / `Ctrl-u`, `PgDn` / `PgUp` | scroll the diff |
+| `f` | cycle the status filter (all → open → applied → rejected) |
+| `a` / `x` | apply / reject the selected proposal (confirm with `y`/`n`) |
+| `r` | refresh the queue from disk |
+| `?` | toggle help |
+| `q` / `Esc` | quit |
+
+Run without a terminal (piped/CI), `curator review` prints guidance and exits
+`0` rather than blocking — pass an `<id>` for the non-interactive render.
 
 ## `curator digest run`
 

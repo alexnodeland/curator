@@ -449,3 +449,86 @@ fn status_reports_a_missing_index_without_failing() {
         "human output should say the index is not built"
     );
 }
+
+/// Seed one open proposal (a plain new note) into the vault the config
+/// points at, and return its id. Uses the library primitive directly —
+/// the same path `curator propose` / `kp_propose` drive.
+fn seed_proposal(dir: &Path, path: &str, content: &str, title: &str) -> String {
+    let vault = curator_core::Vault::open(dir.join("vault")).expect("open vault");
+    curator_core::create_proposal(
+        &vault,
+        ".kp/proposals",
+        "test",
+        title,
+        "because",
+        &[curator_core::ProposalFile {
+            path: path.to_owned(),
+            content: content.to_owned(),
+        }],
+    )
+    .expect("create proposal")
+    .id
+}
+
+/// `curator reject <id>` stamps an open proposal `rejected` without writing
+/// its files, and a rejected proposal can no longer be applied (one-way).
+#[test]
+fn reject_stamps_rejected_and_blocks_a_later_apply() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path());
+    let id = seed_proposal(dir.path(), "notes/new.md", "# New\n", "A change");
+
+    let out = stdout_json(&curator(&config, &["reject", &id, "--json"]));
+    assert_eq!(out["status"], "rejected");
+
+    // The target file was never written.
+    assert!(!dir.path().join("vault/notes/new.md").exists());
+
+    // Apply now refuses — the transition is terminal.
+    let out = curator(&config, &["apply", &id]);
+    assert!(
+        !out.status.success(),
+        "apply of a rejected proposal must fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("already rejected"), "got: {stderr}");
+}
+
+/// `curator review` with no id and no TTY (piped stdio, as in CI) must not
+/// block on the interactive event loop — it prints guidance and exits 0.
+#[test]
+fn review_without_id_and_without_tty_prints_guidance() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path());
+
+    let out = curator(&config, &["review"]);
+    assert!(
+        out.status.success(),
+        "review guard must exit cleanly, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("not a terminal") || text.contains("interactive"),
+        "expected guidance, got: {text}"
+    );
+}
+
+/// `curator review <id>` keeps its non-interactive render (unchanged) —
+/// the metadata and target path show up in the output.
+#[test]
+fn review_with_id_still_renders_non_interactively() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path());
+    let id = seed_proposal(dir.path(), "notes/x.md", "# X\n", "Rendered title");
+
+    let out = curator(&config, &["review", &id]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Rendered title"), "got: {text}");
+    assert!(text.contains("notes/x.md"), "got: {text}");
+}
