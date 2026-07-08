@@ -392,3 +392,60 @@ fn config_discovery_prefers_curator_toml_and_accepts_legacy_kp_toml() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// `curator status` is a state snapshot: it reports the vault note count, the
+/// serving index epoch/embedder, and the (empty) proposal queue, in both JSON
+/// and human form, and always succeeds.
+#[test]
+fn status_snapshots_vault_index_and_proposals() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = seed(dir.path()); // 3 notes, hash-embedded index, no proposals
+
+    let out = stdout_json(&curator(&config, &["status", "--json"]));
+    assert_eq!(out["vault"]["notes"], 3);
+    assert_eq!(out["index"]["notes"], 3);
+    assert_eq!(out["index"]["embedder_id"], "hash");
+    assert_eq!(out["index"]["epoch"], 1);
+    assert!(out["index"]["latest_digest"].is_null(), "no digest run yet");
+    assert_eq!(out["proposals"]["total"], 0);
+    assert_eq!(out["proposals"]["open"], 0);
+    assert_eq!(out["mcp_transport"], "stdio");
+
+    // Human output names the note count and exits 0.
+    let out = curator(&config, &["status"]);
+    assert!(out.status.success(), "status must never fail");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("3 note(s)"), "got: {text}");
+}
+
+/// With no index built yet, `status` reports "not built" rather than failing —
+/// it is a snapshot, not a health gate.
+#[test]
+fn status_reports_a_missing_index_without_failing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vault = dir.path().join("vault");
+    std::fs::create_dir_all(&vault).expect("mkdir vault");
+    let config = dir.path().join("curator.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "schema = \"kp-config/v1\"\n\
+             [vault]\npath = \"{}\"\n\
+             [index]\npath = \"{}\"\nembedder = \"hash\"\n",
+            vault.display(),
+            dir.path().join("index.db").display(),
+        ),
+    )
+    .expect("write config");
+
+    let out = stdout_json(&curator(&config, &["status", "--json"]));
+    assert!(out["index"].is_null(), "no index.db yet");
+    assert_eq!(out["vault"]["notes"], 0);
+
+    let out = curator(&config, &["status"]);
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("not built"),
+        "human output should say the index is not built"
+    );
+}

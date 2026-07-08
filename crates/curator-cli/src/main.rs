@@ -9,27 +9,6 @@ use curator_index::{Embedder, embedder_from_config};
 use curator_mcp::KpEngine;
 use curator_mcp::types::{NoteKind, SearchMode};
 
-/// Subcommands the v1 CLI grows into (per `docs/design/architecture.md`).
-const COMMANDS: [&str; 17] = [
-    "init",
-    "ingest",
-    "index",
-    "reindex",
-    "search",
-    "get",
-    "related",
-    "recent",
-    "mcp",
-    "propose",
-    "review",
-    "apply",
-    "proposals",
-    "digest",
-    "doctor",
-    "status",
-    "zotero",
-];
-
 const USAGE: &str = "curator — the Knowledge Plane
 
 Usage: curator <command> [args]
@@ -180,11 +159,8 @@ fn main() -> ExitCode {
             }
         },
         Some("doctor") => run_or_fail(cmd_doctor(&args[1..])),
+        Some("status") => run_or_fail(cmd_status(&args[1..])),
         Some("init") => run_or_fail(cmd_init(&args[1..])),
-        Some(cmd) if COMMANDS.contains(&cmd) => {
-            eprintln!("curator {cmd}: not implemented yet (pre-release scaffold)");
-            ExitCode::from(2)
-        }
         Some(other) => {
             eprintln!("curator: unknown command {other:?} — run `curator --help`");
             ExitCode::from(2)
@@ -1034,6 +1010,126 @@ fn cmd_doctor(args: &[String]) -> Result<(), String> {
     if errors > 0 {
         return Err(format!("{errors} check(s) failed"));
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// status — a state snapshot (vault + index + proposals overview)
+// ---------------------------------------------------------------------------
+
+/// The `curator status` overview. Unlike `doctor` — which runs health
+/// *checks* and exits non-zero on any error — this is a state snapshot: it
+/// reports what is there (vault notes, the serving index epoch/embedder, the
+/// proposal queue, the MCP transport) and always succeeds, so it is safe to
+/// script. A missing index is a normal "not built yet" state, not an error.
+#[derive(serde::Serialize)]
+struct StatusReport {
+    vault: StatusVault,
+    /// `None` until the first `curator ingest` builds `index.db`.
+    index: Option<StatusIndex>,
+    proposals: StatusProposals,
+    mcp_transport: String,
+}
+
+#[derive(serde::Serialize)]
+struct StatusVault {
+    path: String,
+    notes: usize,
+}
+
+#[derive(serde::Serialize)]
+struct StatusIndex {
+    epoch: i64,
+    schema_version: i64,
+    embedder_id: String,
+    dims: usize,
+    notes: i64,
+    /// The date of the most recent librarian digest, if any has run.
+    latest_digest: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct StatusProposals {
+    total: usize,
+    open: usize,
+}
+
+fn cmd_status(args: &[String]) -> Result<(), String> {
+    let batch = parse_batch_args(args)?;
+    let config = batch.config;
+
+    // Vault + its note count.
+    let vault = curator_core::Vault::open(config.vault_path()).map_err(|e| e.to_string())?;
+    let vault_status = StatusVault {
+        path: vault.root().display().to_string(),
+        notes: vault.note_paths().map(|p| p.len()).unwrap_or(0),
+    };
+
+    // Proposal queue.
+    let proposals = curator_core::list_proposals(&vault, &config.vault.proposals_dir)
+        .map_err(|e| e.to_string())?;
+    let proposals_status = StatusProposals {
+        open: proposals
+            .iter()
+            .filter(|p| p.status == curator_core::ProposalStatus::Open)
+            .count(),
+        total: proposals.len(),
+    };
+
+    // The serving index epoch — absent until the first ingest.
+    let index_path = config.index_path();
+    let index_status = if index_path.exists() {
+        let reader = curator_index::IndexReader::open(&index_path).map_err(|e| e.to_string())?;
+        let meta = reader.meta().clone();
+        Some(StatusIndex {
+            epoch: meta.epoch,
+            schema_version: meta.schema_version,
+            embedder_id: meta.embedder_id,
+            dims: meta.dims,
+            notes: reader.note_count().unwrap_or(0),
+            latest_digest: reader
+                .last_digest_entry()
+                .ok()
+                .flatten()
+                .map(|e| e.digest_date),
+        })
+    } else {
+        None
+    };
+
+    let report = StatusReport {
+        vault: vault_status,
+        index: index_status,
+        proposals: proposals_status,
+        mcp_transport: config.mcp.transport.clone(),
+    };
+
+    if batch.json {
+        return print_json(&report);
+    }
+
+    println!(
+        "vault      {} — {} note(s)",
+        report.vault.path, report.vault.notes
+    );
+    match &report.index {
+        Some(idx) => {
+            println!(
+                "index      epoch {} · schema v{} · {} ({} dims) · {} note(s)",
+                idx.epoch, idx.schema_version, idx.embedder_id, idx.dims, idx.notes
+            );
+            match &idx.latest_digest {
+                Some(date) => println!("digest     latest {date}"),
+                None => println!("digest     none yet — `curator digest run`"),
+            }
+        }
+        None => println!("index      not built — run `curator ingest`"),
+    }
+    println!(
+        "proposals  {} total, {} open",
+        report.proposals.total, report.proposals.open
+    );
+    println!("mcp        {}", report.mcp_transport);
     Ok(())
 }
 

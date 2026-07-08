@@ -27,7 +27,7 @@ text, expanded. Every command exits `0` on success, `1` on failure
 | [`proposals list`](#curator-review-apply-proposals-list) | list stored proposals and their status |
 | [`digest run`](#curator-digest-run) | run the deterministic librarian digest (`--auto` to apply) |
 | [`doctor`](#curator-doctor) | config / vault / index / cursors health |
-| `status` | vault + index + proposals overview — **not implemented yet** (pre-release scaffold; exits 2) |
+| [`status`](#curator-status) | vault + index + proposals snapshot (always succeeds; `--json`) |
 | `-h`, `--help` / `-V`, `--version` | usage / version |
 
 Shared flag on every command that loads config:
@@ -194,3 +194,15 @@ embedder identity match, digest log, Curio cursors, and MCP transport
 sanity. Levels `ok`/`warn`/`error`; exits nonzero when anything
 errors — healthcheck-ready
 ([operations guidance](../operations.md#watching-it)).
+
+## `curator status`
+
+```sh
+curator status [--config <path>] [--json]
+```
+
+A state *snapshot* — the counterpart to `doctor`'s health *checks*. Reports
+the vault note count, the serving index epoch/embedder/note count, the latest
+librarian digest, the proposal queue (total + open), and the MCP transport.
+Unlike `doctor` it never fails: a not-yet-built index is reported as `not
+built`, not an error, so `status --json` is safe to pipe into scripts.
