@@ -1,5 +1,7 @@
 # Curator
 
+![A curator terminal session: init, hybrid search, librarian digest, status](assets/demo.svg)
+
 Curator is the knowledge plane under your personal knowledge system:
 **any plain-markdown vault** + **one index database** + **MCP for
 agents** + **a deterministic librarian**.

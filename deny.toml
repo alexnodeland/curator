@@ -2,10 +2,10 @@
 # CI job). The check proves the release-binary dependency tree carries
 # no copyleft: everything must match the permissive allow-list below.
 #
-# Workspace crates are `publish = false` (pre-release) and carry no
-# `license` field yet — `private.ignore` skips them; the audit is about
-# what we SHIP FROM others, not what we haven't decided for ourselves
-# (the repo license is deliberately TBD, see README).
+# Workspace crates are MIT-licensed (LICENSE + `license = "MIT"` at
+# workspace.package) but stay `publish = false` while pre-release, so
+# `private.ignore` skips them: the audit is about what we SHIP FROM
+# others, not our own already-decided license.
 
 [graph]
 # Audit the shipped artifact set: every target the release workflow
