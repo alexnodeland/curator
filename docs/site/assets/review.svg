@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" width="900" height="540" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-labelledby="t d">
+  <title id="t">The curator review proposal reviewer</title>
+  <desc id="d">The interactive curator review TUI: a proposal queue on the left with status glyphs, a detail pane on the right showing the selected digest proposal's metadata, a green pre-flight banner confirming the patch applies cleanly, and a coloured diff of the file it would create. A footer lists the key bindings.</desc>
+  <style>
+    .val { fill: #e6edf3; }                 /* default foreground        */
+    .lbl { fill: #8b949e; }                 /* metadata key labels       */
+    .dim { fill: #6e7681; }                 /* footer hints, hunk marker */
+    .ok  { fill: #3fb950; }                 /* green: applied, +, ✓      */
+    .warn{ fill: #d29922; }                 /* yellow: open ●            */
+    .err { fill: #f85149; }                 /* red: rejected ✗           */
+    .hd  { fill: #56d4dd; font-weight: 600; } /* cyan diff file header    */
+    text { font-size: 14px; white-space: pre; }
+  </style>
+
+  <!-- window chrome -->
+  <rect x="8" y="8" width="884" height="524" rx="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <circle cx="32" cy="30" r="6" fill="#ff5f56"/>
+  <circle cx="52" cy="30" r="6" fill="#ffbd2e"/>
+  <circle cx="72" cy="30" r="6" fill="#27c93f"/>
+  <text x="450" y="35" text-anchor="middle" fill="#6e7681" font-size="12">curator review</text>
+  <line x1="8" y1="50" x2="892" y2="50" stroke="#21262d" stroke-width="1"/>
+
+  <!-- panes -->
+  <rect x="20"  y="66" width="348" height="404" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="380" y="66" width="504" height="404" fill="none" stroke="#30363d" stroke-width="1"/>
+
+  <!-- pane titles, breaking the top border like ratatui block titles -->
+  <rect x="32"  y="60" width="182" height="12" fill="#0d1117"/>
+  <text x="36"  y="71" class="val"> proposals · all (3) </text>
+  <rect x="392" y="60" width="72"  height="12" fill="#0d1117"/>
+  <text x="396" y="71" class="val"> detail </text>
+
+  <!-- list: selection highlight (▍ + current-line background), open ● / applied ✓ / rejected ✗ -->
+  <rect x="22" y="76" width="344" height="20" fill="#1f242c"/>
+  <text x="30" y="90"><tspan class="ok">▍</tspan><tspan class="warn">●</tspan> <tspan class="val">01KWZG9AV3  Daily digest 2026-07-08</tspan></text>
+  <text x="30" y="110"> <tspan class="ok">✓</tspan> <tspan class="val">01KWQ4M2H8  Note: hybrid retrieval</tspan></text>
+  <text x="30" y="130"> <tspan class="err">✗</tspan> <tspan class="val">01KWP8XR5T  Rename topic cluster</tspan></text>
+
+  <!-- detail: metadata, pre-flight banner, coloured diff -->
+  <text x="392" y="90"><tspan class="lbl">title:</tspan> <tspan class="val">Daily digest 2026-07-08</tspan></text>
+  <text x="392" y="110"><tspan class="lbl">author:</tspan> <tspan class="val">kp-librarian</tspan></text>
+  <text x="392" y="130"><tspan class="lbl">created:</tspan> <tspan class="val">2026-07-08T09:00:00Z</tspan></text>
+  <text x="392" y="150"><tspan class="lbl">status:</tspan> <tspan class="val">open</tspan></text>
+  <text x="392" y="170"><tspan class="lbl">rationale:</tspan> <tspan class="val">11 notes surfaced against now.md</tspan></text>
+  <text x="392" y="190" class="val">files: 1</text>
+
+  <text x="392" y="222" class="ok">✓ applies cleanly against the current vault</text>
+
+  <text x="392" y="254" class="hd">create  digests/2026-07-08.md</text>
+  <text x="392" y="274" class="dim">@@ -0,0 +1,8 @@</text>
+  <text x="392" y="294" class="ok">+# Daily digest — 2026-07-08</text>
+  <text x="392" y="314" class="ok">+</text>
+  <text x="392" y="334" class="ok">+## Surfaced (11)</text>
+  <text x="392" y="354" class="ok">+- [[hybrid-retrieval]] — RRF fusion notes</text>
+  <text x="392" y="374" class="ok">+- [[zettelkasten]] — atomic-note workflow</text>
+  <text x="392" y="394" class="ok">+- [[embeddings-101]] — bge-small, 384-dim</text>
+  <text x="392" y="414" class="ok">+</text>
+  <text x="392" y="434" class="ok">+_Ranked against now.md · zero LLM._</text>
+
+  <!-- footer: the exact key-hint line -->
+  <text x="24" y="498" class="dim"> j/k move · ^d/^u scroll · f filter · a apply · x reject · r refresh · ? help · q quit</text>
+</svg>
