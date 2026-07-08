@@ -24,15 +24,17 @@ agents** + **a deterministic librarian**.
 > around them are still settling. Not yet packaged — install is
 > build-from-source ([Quickstart](quickstart.md)).
 
-## Review proposals interactively
+## The interactive TUI
 
-Agents never write your notes — they file proposals, and you decide.
-`curator review` opens a full-screen reviewer over the queue: a coloured diff,
-a non-destructive **pre-flight** drift check, and apply/reject with confirm.
+`curator review` opens a **tabbed terminal app** over your vault: **Review**
+proposals (coloured diff, a non-destructive **pre-flight** drift check,
+apply/reject), **Search** the corpus (hybrid retrieval, open notes, related),
+and preview or **generate** the librarian **Digest**.
 
-![The curator review TUI: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff — apply or reject from the footer](assets/review.svg)
+![The Review screen: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff](assets/review.svg)
 
-The full key map lives in the [CLI reference](reference/cli.md#curator-review-apply-reject-proposals-list).
+Every screen, key, and the Search / Digest walkthroughs are in the
+[CLI reference](reference/cli.md#curator-review-apply-reject-proposals-list).
 
 ## Where to start
 

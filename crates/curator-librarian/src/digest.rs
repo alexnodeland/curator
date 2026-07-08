@@ -23,7 +23,7 @@ use curator_core::note::{Frontmatter, Note, NoteFrontmatter};
 use curator_core::time::{parse_rfc3339_utc, rfc3339_utc};
 use curator_core::{KpConfig, KpId, ProposalFile, ProposalWriteError, Vault, VaultError};
 use curator_index::embed::{EmbedError, cosine};
-use curator_index::{ChunkParams, Embedder, Index, IndexError};
+use curator_index::{ChunkParams, Embedder, Index, IndexError, IndexReader};
 use curator_ingest::chunk_markdown;
 
 use crate::proposals::{ApplyError, apply_proposal, auto_applicable};
@@ -113,6 +113,10 @@ pub struct DigestParams {
 /// One scored candidate.
 #[derive(Debug)]
 struct Scored<'a> {
+    /// Index into the `candidates` slice `score_candidates` was called with,
+    /// so callers can map a ranked entry back to its `Candidate` after the
+    /// sort reorders them (see [`rank_candidates`]).
+    index: usize,
     candidate: &'a Candidate,
     /// `None` when there is no anchor or the note has no centroid.
     similarity: Option<f64>,
@@ -124,7 +128,8 @@ fn score_candidates<'a>(params: &DigestParams, candidates: &'a [Candidate]) -> V
     let half_life = f64::from(params.half_life_days.max(1));
     let mut scored: Vec<Scored<'a>> = candidates
         .iter()
-        .map(|candidate| {
+        .enumerate()
+        .map(|(index, candidate)| {
             let similarity = match (&params.anchor, &candidate.centroid) {
                 (Some(anchor), Some(centroid)) => Some(f64::from(cosine(anchor, centroid))),
                 _ => None,
@@ -141,6 +146,7 @@ fn score_candidates<'a>(params: &DigestParams, candidates: &'a [Candidate]) -> V
             // No anchor (or no vectors) = recency-only: similarity term 1.
             let score = similarity.unwrap_or(1.0) * recency * boost;
             Scored {
+                index,
                 candidate,
                 similarity,
                 age_days,
@@ -254,6 +260,54 @@ fn why_surfaced(item: &Scored<'_>) -> String {
     parts.join(" · ")
 }
 
+/// One ranked candidate, owned and score-ordered — the public projection of
+/// the internal `Scored`. `index` points back into the `candidates` slice
+/// [`rank_candidates`] was called with (the ranking reorders, so callers
+/// index rather than assume position). This is what an interactive digest
+/// previewer renders: the same score and why-surfaced string the digest note
+/// would carry, without writing anything.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankedCandidate {
+    /// Position of this candidate in the input slice.
+    pub index: usize,
+    /// `now.md` cosine similarity; `None` under recency-only ranking.
+    pub similarity: Option<f64>,
+    pub age_days: f64,
+    pub score: f64,
+    /// The human "why-surfaced" note (e.g. `similarity 0.42 · 3d old · starred`).
+    pub why: String,
+    /// In the surfaced top-k (`true`), or below the cut (`false`), for the
+    /// given [`DigestParams::top_k`]. NOTE: `false` does not imply the note's
+    /// "quiet items" tail — the written digest caps that tail (see
+    /// `render_digest_body`), while [`rank_candidates`] ranks *every*
+    /// candidate. The previewer shows the full ranking on purpose.
+    pub surfaced: bool,
+}
+
+/// Rank *every* candidate exactly as the digest scores them — same score,
+/// same order — returning an owned, renderable projection instead of a
+/// markdown body. Powers the interactive digest previewer. The ranking is
+/// identical to what [`render_digest_body`] uses; the written note then
+/// surfaces the top-k and truncates its quiet tail, whereas the previewer
+/// deliberately shows the whole ranked set so nothing is hidden from triage.
+#[must_use]
+pub fn rank_candidates(params: &DigestParams, candidates: &[Candidate]) -> Vec<RankedCandidate> {
+    let scored = score_candidates(params, candidates);
+    let top_k = params.top_k.min(scored.len());
+    scored
+        .iter()
+        .enumerate()
+        .map(|(rank, s)| RankedCandidate {
+            index: s.index,
+            similarity: s.similarity,
+            age_days: s.age_days,
+            score: s.score,
+            why: why_surfaced(s),
+            surfaced: rank < top_k,
+        })
+        .collect()
+}
+
 /// The tag/source cluster a note belongs to: first tag, else the source
 /// host, else `notes`.
 fn cluster_key(candidate: &Candidate) -> String {
@@ -312,6 +366,196 @@ fn clip(text: &str, max_chars: usize) -> String {
     out
 }
 
+/// The candidates a digest would score, plus the interest anchor, gathered
+/// from the index. Internal glue shared by `run_digest` and `preview_digest`
+/// so the two never disagree on what counts as a candidate.
+#[derive(Debug)]
+struct CandidateSet {
+    /// Notes ingested or behaviorally active since the cutoff, minus digests
+    /// and the anchor note itself.
+    candidates: Vec<Candidate>,
+    /// The now.md interest-anchor embedding; `None` = recency-only.
+    anchor: Option<Vec<f32>>,
+    /// Non-fatal notes (missing / empty now.md).
+    warnings: Vec<String>,
+}
+
+/// Gather digest candidates and the now.md anchor from an open index reader.
+/// An empty candidate set skips the anchor embed entirely — there is nothing
+/// to score — which preserves `run_digest`'s original "return before touching
+/// now.md" behavior.
+fn collect_candidates(
+    vault: &Vault,
+    reader: &IndexReader,
+    config: &KpConfig,
+    embedder: &dyn Embedder,
+    now_unix: u64,
+    cutoff: Option<&str>,
+) -> Result<CandidateSet, DigestError> {
+    let digest_prefix = format!("{}/", config.librarian.digest_dir.trim_end_matches('/'));
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for summary in reader.active_since(cutoff)? {
+        // Never digest digests, and never surface the anchor itself.
+        if summary.path.starts_with(&digest_prefix) || summary.path == config.librarian.now_path {
+            continue;
+        }
+        let Some(record) = reader.get_note(&summary.kp_id)? else {
+            continue;
+        };
+        let behavior = reader.behavior(&summary.kp_id)?;
+        let note_time = [&record.updated, &record.created]
+            .into_iter()
+            .flatten()
+            .find_map(|ts| parse_rfc3339_utc(ts))
+            .or_else(|| parse_rfc3339_utc(&record.ingested_at))
+            .unwrap_or(now_unix);
+        candidates.push(Candidate {
+            centroid: reader.note_centroid(&summary.kp_id)?,
+            kp_id: record.kp_id,
+            path: record.path,
+            title: record.title,
+            tags: record.tags,
+            source: record.source,
+            note_time,
+            body: record.body,
+            starred: behavior.as_ref().is_some_and(|b| b.starred),
+            opened: behavior.as_ref().is_some_and(|b| b.opened_count > 0),
+            read_later: behavior.as_ref().is_some_and(|b| b.read_later),
+        });
+    }
+    if candidates.is_empty() {
+        return Ok(CandidateSet {
+            candidates,
+            anchor: None,
+            warnings: Vec::new(),
+        });
+    }
+
+    // The now.md interest anchor; missing / empty = warn + recency-only.
+    let mut warnings = Vec::new();
+    let anchor = match vault.read(&config.librarian.now_path) {
+        Ok(raw) => {
+            let body = Note::parse(config.librarian.now_path.as_str(), &raw)
+                .map(|note| note.body)
+                .unwrap_or(raw);
+            let vector = embedder.embed_one(&body)?;
+            if vector.iter().all(|x| *x == 0.0) {
+                warnings.push(format!(
+                    "{} is empty — recency-only scoring",
+                    config.librarian.now_path
+                ));
+                None
+            } else {
+                Some(vector)
+            }
+        }
+        Err(_) => {
+            let warning = format!(
+                "{} not found — recency-only scoring (set [librarian].now_path)",
+                config.librarian.now_path
+            );
+            tracing::warn!("{warning}");
+            warnings.push(warning);
+            None
+        }
+    };
+    Ok(CandidateSet {
+        candidates,
+        anchor,
+        warnings,
+    })
+}
+
+/// A read-only preview of the digest the librarian would generate right now —
+/// everything an interactive previewer needs, and nothing written. `curator
+/// digest run` (i.e. [`run_digest`]) remains the write path.
+#[derive(Debug)]
+pub struct DigestPreview {
+    /// `YYYY-MM-DD` of the digest this would generate.
+    pub date: String,
+    /// Vault-relative path the digest note would be created at.
+    pub note_path: String,
+    /// The scoring knobs (top_k, half-life, anchor presence) used.
+    pub params: DigestParams,
+    /// Candidates in input order; index with [`RankedCandidate::index`].
+    pub candidates: Vec<Candidate>,
+    /// Every candidate ranked exactly as the digest scores them (the full
+    /// set — not the note's truncated view).
+    pub ranked: Vec<RankedCandidate>,
+    /// A self-consistent split of `ranked` for this preview: `surfaced` is the
+    /// top-k, `quiet` is everything below the cut (`surfaced + quiet ==
+    /// ranked.len()`). The written note surfaces the same top-k but truncates
+    /// its quiet tail, so its quiet section may be shorter than `quiet` here.
+    pub surfaced: usize,
+    pub quiet: usize,
+    /// Non-fatal notes (missing / empty now.md).
+    pub warnings: Vec<String>,
+    /// A digest for `date` already exists — generating would be a no-op.
+    pub already_exists: bool,
+}
+
+/// Preview the digest the librarian would generate now, writing nothing. The
+/// ranking is identical to [`run_digest`]'s — both gather candidates the same
+/// way and rank via [`rank_candidates`] — so the preview's order and scores
+/// are exactly the digest's. (The previewer shows the full ranking; the
+/// generated note surfaces the top-k and a length-capped quiet tail.)
+pub fn preview_digest(
+    config: &KpConfig,
+    embedder: &dyn Embedder,
+    now_unix: u64,
+) -> Result<DigestPreview, DigestError> {
+    let vault = Vault::open(config.vault_path())?;
+    let index_path = config.index_path();
+    if !index_path.exists() {
+        return Err(DigestError::IndexMissing(index_path));
+    }
+    let index = Index::open(&index_path, embedder)?;
+    let reader = index.reader()?;
+
+    let now_str = rfc3339_utc(now_unix);
+    let date = now_str[..10].to_owned();
+    let digest_dir = config.librarian.digest_dir.trim_end_matches('/');
+    let note_path = format!("{digest_dir}/{date}.md");
+
+    let last = reader.last_digest_entry()?;
+    let already_exists = vault.resolve(&note_path)?.exists()
+        || last.as_ref().is_some_and(|entry| entry.digest_date == date);
+    let cutoff = last.as_ref().map(|entry| entry.created.clone());
+
+    let set = collect_candidates(
+        &vault,
+        &reader,
+        config,
+        embedder,
+        now_unix,
+        cutoff.as_deref(),
+    )?;
+    let params = DigestParams {
+        date: date.clone(),
+        now_unix,
+        half_life_days: config.librarian.half_life_days,
+        top_k: config.librarian.top_k as usize,
+        anchor: set.anchor,
+    };
+    let ranked = rank_candidates(&params, &set.candidates);
+    // Counts describe THIS preview (the full ranking the screen renders), so
+    // the header and the surfaced/quiet filters agree with the visible rows.
+    // The note's own quiet tail is capped separately (`digest_counts`).
+    let surfaced = ranked.iter().filter(|r| r.surfaced).count();
+    let quiet = ranked.len() - surfaced;
+    Ok(DigestPreview {
+        date,
+        note_path,
+        params,
+        candidates: set.candidates,
+        ranked,
+        surfaced,
+        quiet,
+        warnings: set.warnings,
+        already_exists,
+    })
+}
+
 /// Run one digest against the configured vault + index.
 ///
 /// - `now_unix` is the injected clock — same inputs, same clock, same
@@ -362,82 +606,34 @@ pub fn run_digest(
         return Ok(report);
     }
 
-    // Candidates: ingested or active since the last digest run.
+    // Candidates + interest anchor — shared with `preview_digest` so the
+    // two never disagree on what a digest would score.
     let cutoff = last.as_ref().map(|entry| entry.created.clone());
-    let digest_prefix = format!("{digest_dir}/");
-    let mut candidates: Vec<Candidate> = Vec::new();
-    for summary in reader.active_since(cutoff.as_deref())? {
-        // Never digest digests, and never surface the anchor itself.
-        if summary.path.starts_with(&digest_prefix) || summary.path == config.librarian.now_path {
-            continue;
-        }
-        let Some(record) = reader.get_note(&summary.kp_id)? else {
-            continue;
-        };
-        let behavior = reader.behavior(&summary.kp_id)?;
-        let note_time = [&record.updated, &record.created]
-            .into_iter()
-            .flatten()
-            .find_map(|ts| parse_rfc3339_utc(ts))
-            .or_else(|| parse_rfc3339_utc(&record.ingested_at))
-            .unwrap_or(now_unix);
-        candidates.push(Candidate {
-            centroid: reader.note_centroid(&summary.kp_id)?,
-            kp_id: record.kp_id,
-            path: record.path,
-            title: record.title,
-            tags: record.tags,
-            source: record.source,
-            note_time,
-            body: record.body,
-            starred: behavior.as_ref().is_some_and(|b| b.starred),
-            opened: behavior.as_ref().is_some_and(|b| b.opened_count > 0),
-            read_later: behavior.as_ref().is_some_and(|b| b.read_later),
-        });
-    }
-    report.candidates = candidates.len();
-    if candidates.is_empty() {
+    let set = collect_candidates(
+        &vault,
+        &reader,
+        config,
+        embedder,
+        now_unix,
+        cutoff.as_deref(),
+    )?;
+    report.candidates = set.candidates.len();
+    report.warnings = set.warnings;
+    if set.candidates.is_empty() {
         report.skipped = Some(match &cutoff {
             Some(since) => format!("no notes ingested or active since {since}"),
             None => "no notes in the index".to_owned(),
         });
         return Ok(report);
     }
-
-    // The now.md interest anchor; missing = warn + recency-only.
-    let anchor = match vault.read(&config.librarian.now_path) {
-        Ok(raw) => {
-            let body = Note::parse(config.librarian.now_path.as_str(), &raw)
-                .map(|note| note.body)
-                .unwrap_or(raw);
-            let vector = embedder.embed_one(&body)?;
-            if vector.iter().all(|x| *x == 0.0) {
-                report.warnings.push(format!(
-                    "{} is empty — recency-only scoring",
-                    config.librarian.now_path
-                ));
-                None
-            } else {
-                Some(vector)
-            }
-        }
-        Err(_) => {
-            let warning = format!(
-                "{} not found — recency-only scoring (set [librarian].now_path)",
-                config.librarian.now_path
-            );
-            tracing::warn!("{warning}");
-            report.warnings.push(warning);
-            None
-        }
-    };
+    let candidates = set.candidates;
 
     let params = DigestParams {
         date: date.clone(),
         now_unix,
         half_life_days: config.librarian.half_life_days,
         top_k: config.librarian.top_k as usize,
-        anchor,
+        anchor: set.anchor,
     };
     let body = render_digest_body(&params, &candidates);
     (report.items, report.quiet) = digest_counts(&params, &candidates);
@@ -671,5 +867,74 @@ mod tests {
         assert_eq!(cluster_key(&c), "example.com");
         c.tags = vec!["rust".to_owned()];
         assert_eq!(cluster_key(&c), "rust");
+    }
+
+    #[test]
+    fn rank_candidates_orders_by_score_and_flags_the_top_k() {
+        let e = HashEmbedder::default();
+        let (params, candidates) = fixture(&e); // top_k = 2, three candidates
+        let ranked = rank_candidates(&params, &candidates);
+        assert_eq!(ranked.len(), candidates.len());
+
+        // Score-descending, and every `index` points back into `candidates`.
+        for pair in ranked.windows(2) {
+            assert!(
+                pair[0].score >= pair[1].score,
+                "not score-ordered: {ranked:?}"
+            );
+        }
+        // The starred, on-topic note ranks first; the off-topic note last.
+        assert_eq!(candidates[ranked[0].index].kp_id, "kp:a-db");
+        assert_eq!(candidates[ranked[2].index].kp_id, "kp:c-bread");
+
+        // top_k = 2 → first two surfaced, the tail quiet.
+        assert!(ranked[0].surfaced && ranked[1].surfaced);
+        assert!(!ranked[2].surfaced, "the 3rd of top_k=2 is the quiet tail");
+
+        // The why-string carries similarity + the behavior flags.
+        assert!(ranked[0].why.contains("similarity 0."), "{}", ranked[0].why);
+        assert!(ranked[0].why.contains("starred"), "{}", ranked[0].why);
+        assert!(ranked[0].similarity.is_some());
+    }
+
+    #[test]
+    fn rank_candidates_recency_only_has_no_similarity() {
+        let e = HashEmbedder::default();
+        let (mut params, candidates) = fixture(&e);
+        params.anchor = None;
+        let ranked = rank_candidates(&params, &candidates);
+        assert!(ranked.iter().all(|r| r.similarity.is_none()));
+        assert!(ranked.iter().all(|r| !r.why.contains("similarity")));
+        assert!(ranked.iter().all(|r| r.why.contains("d old")));
+    }
+
+    // The previewer's ranking must not drift from the written digest: an
+    // item flagged `surfaced` renders in a cluster section, a non-surfaced
+    // one in the quiet tail — the same split `render_digest_body` makes.
+    #[test]
+    fn rank_candidates_surfaced_flag_matches_the_rendered_sections() {
+        let e = HashEmbedder::default();
+        let (params, candidates) = fixture(&e);
+        let ranked = rank_candidates(&params, &candidates);
+        let body = render_digest_body(&params, &candidates);
+        let quiet_at = body.find("## Quiet items");
+
+        assert_eq!(
+            ranked.iter().filter(|r| r.surfaced).count(),
+            params.top_k.min(candidates.len()),
+            "surfaced count must equal top_k",
+        );
+        for r in ranked.iter().filter(|r| r.surfaced) {
+            let target = candidates[r.index]
+                .path
+                .strip_suffix(".md")
+                .unwrap_or(&candidates[r.index].path);
+            let at = body
+                .find(target)
+                .unwrap_or_else(|| panic!("surfaced {target} not in body"));
+            if let Some(q) = quiet_at {
+                assert!(at < q, "surfaced {target} rendered in the quiet tail");
+            }
+        }
     }
 }

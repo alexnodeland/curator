@@ -22,7 +22,7 @@ text, expanded. Every command exits `0` on success, `1` on failure
 | [`recent`](#curator-recent) | recently ingested/changed notes |
 | [`mcp serve`](#curator-mcp-serve) | serve the MCP surface (stdio default; `--http` + bearer) |
 | [`propose`](#curator-propose) | create a `proposals/v1` changeset from a directory of files |
-| [`review [<id>]`](#curator-review-apply-reject-proposals-list) | interactive proposal reviewer (no id), or render one proposal |
+| [`review [<id>]`](#curator-review-apply-reject-proposals-list) | interactive TUI — Review · Search · Digest (no id), or render one proposal |
 | [`apply <id>`](#curator-review-apply-reject-proposals-list) | validate and apply a proposal (stamps applied/rejected) |
 | [`reject <id>`](#curator-review-apply-reject-proposals-list) | reject an open proposal without applying it (stamps rejected) |
 | [`proposals list`](#curator-review-apply-reject-proposals-list) | list stored proposals and their status |
@@ -164,7 +164,7 @@ mode (diffing working-tree edits) is planned, not yet implemented.
 ## `curator review` / `apply` / `reject` / `proposals list`
 
 ```sh
-curator review            # interactive reviewer over the whole queue (a TTY)
+curator review            # the interactive TUI (Review · Search · Digest) — a TTY
 curator review <id>       # human-readable render of one changeset (scriptable)
 curator apply <id>        # validate -> apply -> stamp status
 curator reject <id>       # stamp an open proposal rejected, writing nothing
@@ -177,14 +177,21 @@ and stamps `applied`/`rejected`. A *failed* apply also stamps `rejected`;
 `reject` is the reviewer saying "no" up front — same one-way guard (only an
 `open` proposal can be rejected), but nothing is written.
 
-**The interactive reviewer.** `curator review` with no id and a terminal opens
-a full-screen reviewer: the proposal queue on the left, the selected
-changeset's metadata + a coloured diff on the right, and a **pre-flight**
-banner that checks — non-destructively — whether the patch still applies
-cleanly against the current vault, so drift is visible *before* you commit
-(apply is destructive-on-reject). Apply and reject both ask to confirm.
+**The interactive TUI.** `curator review` with no id and a terminal opens a
+**tabbed** full-screen app — three screens over your vault. `Tab` / `Shift-Tab`
+or `1` `2` `3` switch screens, `?` toggles a key reference, `q` quits
+(`Ctrl-C` anywhere; `Esc` is back / cancel / close-preview). The index and
+embedder load **lazily** — a review-only session never opens them, so the app
+starts instantly.
 
-![The curator review TUI: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff — apply or reject from the footer](../assets/review.svg)
+### Review
+
+The proposal queue: the selected changeset's metadata and a **coloured diff**,
+with a **pre-flight** banner that checks — non-destructively — whether the patch
+still applies cleanly against the current vault, so drift is visible *before*
+you commit (apply is destructive-on-reject). Apply and reject both confirm.
+
+![The Review screen: a proposal queue with status glyphs, the selected proposal's metadata, a green pre-flight banner, and a coloured diff](../assets/review.svg)
 
 | key | action |
 |---|---|
@@ -193,8 +200,41 @@ cleanly against the current vault, so drift is visible *before* you commit
 | `f` | cycle the status filter (all → open → applied → rejected) |
 | `a` / `x` | apply / reject the selected proposal (confirm with `y`/`n`) |
 | `r` | refresh the queue from disk |
-| `?` | toggle help |
-| `q` / `Esc` | quit |
+
+### Search
+
+Interactive hybrid retrieval over the same `KpEngine` the MCP surface and
+`curator search` ride — so it cannot drift from them. Type a query and press
+`↵`; move through the ranked hits; open a note's full content, or jump to its
+embedding-nearest neighbours.
+
+![The Search screen: a query box, a ranked results list with scores, and the opened note's content in a preview pane](../assets/search.svg)
+
+| key | action |
+|---|---|
+| type · `↵` | edit the query · run it |
+| `j` / `k` | move through the results |
+| `o` / `↵` | open the selected note · `^d`/`^u` scroll it |
+| `r` | related — embedding-nearest to the selection |
+| `m` | cycle mode (hybrid → vector → fts) and re-run |
+| `/` or `i` | jump to the query box · `Esc` closes the preview / returns |
+
+### Digest
+
+A read-only **preview** of what the [deterministic
+librarian](../concepts.md#the-librarian-is-deterministic) would surface right
+now — ranked candidates with scores and why-surfaced reasons — and a one-key
+**generate** that files today's digest as a proposal (which lands on the Review
+tab to apply or reject). It writes nothing until you generate.
+
+![The Digest screen: ranked candidates with surfaced/quiet glyphs and scores, and a why-surfaced detail pane](../assets/digest.svg)
+
+| key | action |
+|---|---|
+| `j` / `k` | move · `^d`/`^u` scroll the preview |
+| `f` | cycle the filter (all → surfaced → quiet) |
+| `g` | generate today's digest (confirm with `y`/`n`) |
+| `r` | refresh the preview from the index |
 
 Run without a terminal (piped/CI), `curator review` prints guidance and exits
 `0` rather than blocking — pass an `<id>` for the non-interactive render.

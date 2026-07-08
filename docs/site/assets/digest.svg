@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 556" width="900" height="556" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-labelledby="t d">
+  <title id="t">The curator Digest screen</title>
+  <desc id="d">The Digest screen of the curator TUI: a tab bar with Digest active, a header reading "digest 2026-07-08 · 8 surfaced · 3 quiet", a ranked candidate list on the left (★ for surfaced, · for the quiet tail, with scores), and a why-surfaced detail pane on the right showing the selected candidate's score, similarity, age, and an extractive preview.</desc>
+  <style>
+    .val { fill: #e6edf3; }
+    .lbl { fill: #8b949e; }
+    .dim { fill: #6e7681; }
+    .cy  { fill: #56d4dd; }
+    .ok  { fill: #3fb950; }
+    .tab { fill: #8b949e; }
+    text { font-size: 14px; white-space: pre; }
+  </style>
+
+  <rect x="8" y="8" width="884" height="540" rx="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  <circle cx="32" cy="30" r="6" fill="#ff5f56"/>
+  <circle cx="52" cy="30" r="6" fill="#ffbd2e"/>
+  <circle cx="72" cy="30" r="6" fill="#27c93f"/>
+  <text x="450" y="35" text-anchor="middle" fill="#6e7681" font-size="12">curator review</text>
+  <line x1="8" y1="50" x2="892" y2="50" stroke="#21262d" stroke-width="1"/>
+
+  <!-- tab bar: Digest active -->
+  <text x="28" y="71"><tspan class="tab">Review</tspan> <tspan class="dim">│</tspan> <tspan class="tab">Search</tspan> <tspan class="dim">│</tspan></text>
+  <rect x="170" y="58" width="66" height="18" rx="3" fill="#56d4dd"/>
+  <text x="178" y="71"><tspan fill="#0d1117" font-weight="600">Digest</tspan></text>
+  <text x="252" y="71" class="dim">Tab/1·2·3 switch · ? help</text>
+
+  <!-- header -->
+  <text x="24" y="98"><tspan class="val" font-weight="600">digest 2026-07-08</tspan> <tspan class="dim">· 8 surfaced · 3 quiet</tspan></text>
+
+  <!-- candidates pane -->
+  <rect x="20" y="108" width="360" height="392" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="32" y="102" width="196" height="12" fill="#0d1117"/>
+  <text x="36" y="113" class="val"> candidates · all (11) </text>
+
+  <rect x="22" y="118" width="356" height="20" fill="#1f242c"/>
+  <text x="30" y="132"><tspan class="ok">▍★</tspan> <tspan class="cy">0.423</tspan> <tspan class="val">reading-list</tspan></text>
+  <text x="30" y="152"><tspan class="ok"> ★</tspan> <tspan class="cy">0.380</tspan> <tspan class="val">embedded-vector-search</tspan></text>
+  <text x="30" y="172"><tspan class="ok"> ★</tspan> <tspan class="cy">0.365</tspan> <tspan class="val">tomato-companion-planting</tspan></text>
+  <text x="30" y="192"><tspan class="ok"> ★</tspan> <tspan class="cy">0.357</tspan> <tspan class="val">zettelkasten-workflow</tspan></text>
+  <text x="30" y="212"><tspan class="ok"> ★</tspan> <tspan class="cy">0.355</tspan> <tspan class="val">sourdough-hydration</tspan></text>
+  <text x="30" y="232"><tspan class="ok"> ★</tspan> <tspan class="cy">0.336</tspan> <tspan class="val">chunking-strategies</tspan></text>
+  <text x="30" y="252"><tspan class="ok"> ★</tspan> <tspan class="cy">0.332</tspan> <tspan class="val">espresso-dialing-in</tspan></text>
+  <text x="30" y="272"><tspan class="ok"> ★</tspan> <tspan class="cy">0.307</tspan> <tspan class="val">personal-search-engines</tspan></text>
+  <text x="30" y="292"><tspan class="dim"> ·</tspan> <tspan class="cy">0.263</tspan> <tspan class="val">hybrid-retrieval</tspan></text>
+  <text x="30" y="312"><tspan class="dim"> ·</tspan> <tspan class="cy">0.261</tspan> <tspan class="val">agents-and-notes</tspan></text>
+  <text x="30" y="332"><tspan class="dim"> ·</tspan> <tspan class="cy">0.006</tspan> <tspan class="val">SQLite as an application file…</tspan></text>
+
+  <!-- why-surfaced detail pane -->
+  <rect x="388" y="108" width="496" height="392" fill="none" stroke="#30363d" stroke-width="1"/>
+  <rect x="400" y="102" width="112" height="12" fill="#0d1117"/>
+  <text x="404" y="113" class="val"> why surfaced </text>
+  <text x="400" y="132"><tspan class="lbl">title:</tspan> <tspan class="val">reading-list</tspan></text>
+  <text x="400" y="152"><tspan class="lbl">path:</tspan> <tspan class="val">notes/reading-list.md</tspan></text>
+  <text x="400" y="172"><tspan class="lbl">score:</tspan> <tspan class="val">0.4234</tspan></text>
+  <text x="400" y="192"><tspan class="lbl">similarity:</tspan> <tspan class="val">0.423</tspan></text>
+  <text x="400" y="212"><tspan class="lbl">age:</tspan> <tspan class="val">0d</tspan></text>
+  <text x="400" y="244" class="ok">★ surfaced — similarity 0.42 · 0d old</text>
+  <text x="400" y="276" class="dim">preview</text>
+  <text x="400" y="296" class="val">Working queue, roughly ordered:</text>
+
+  <text x="24" y="520" class="dim"> j/k move · ^d/^u scroll · f filter · g generate · r refresh · q quit</text>
+</svg>

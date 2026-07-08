@@ -10,7 +10,7 @@ use std::path::Path;
 use curator_core::note::{Frontmatter, Note};
 use curator_core::{KpConfig, KpId, ProposalStatus, Vault, list_proposals};
 use curator_index::{HashEmbedder, IndexReader};
-use curator_librarian::{is_uuid7, run_digest};
+use curator_librarian::{is_uuid7, preview_digest, run_digest};
 
 /// 2026-07-03T09:15:00Z — the injected clock.
 const NOW: u64 = 1_783_070_100;
@@ -55,6 +55,61 @@ fn build_env(dir: &Path) -> KpConfig {
         dir.join("index.db").display(),
     );
     KpConfig::from_toml_str(&toml).expect("config parses")
+}
+
+#[test]
+fn preview_digest_ranks_without_writing_then_reflects_an_existing_digest() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = build_env(dir.path());
+    let e = HashEmbedder::default();
+    curator_ingest::ingest(&config, &e).expect("ingest");
+
+    // Preview: reads only, ranks the same three candidates the digest would.
+    let preview = preview_digest(&config, &e, NOW).expect("preview");
+    assert!(!preview.already_exists, "no digest for today yet");
+    assert_eq!(preview.date, "2026-07-03");
+    assert_eq!(preview.note_path, "digests/2026-07-03.md");
+    assert_eq!(preview.candidates.len(), 3, "now.md anchor excluded");
+    assert_eq!(preview.ranked.len(), 3);
+    assert!(preview.warnings.is_empty(), "{:?}", preview.warnings);
+    // The surfaced/quiet counts partition the FULL ranking the preview shows,
+    // so the header and the surfaced/quiet filters agree with the visible rows.
+    assert_eq!(
+        preview.surfaced,
+        preview.ranked.iter().filter(|r| r.surfaced).count(),
+    );
+    assert_eq!(
+        preview.quiet,
+        preview.ranked.iter().filter(|r| !r.surfaced).count(),
+    );
+    assert_eq!(
+        preview.surfaced + preview.quiet,
+        preview.ranked.len(),
+        "counts partition every ranked candidate",
+    );
+    // The on-topic, recent note ranks first; every index maps into candidates.
+    assert_eq!(
+        preview.candidates[preview.ranked[0].index].path,
+        "rust/db.md"
+    );
+    assert!(preview.ranked[0].score >= preview.ranked[2].score);
+    assert!(preview.ranked[0].why.contains("similarity 0."));
+
+    // Preview wrote nothing: no proposal, no digest note.
+    let vault = Vault::open(config.vault_path()).expect("vault");
+    assert_eq!(
+        list_proposals(&vault, ".kp/proposals")
+            .expect("lists")
+            .len(),
+        0
+    );
+    assert!(vault.read("digests/2026-07-03.md").is_err());
+
+    // After the digest exists, a fresh preview reports it — generating again
+    // would be a no-op.
+    run_digest(&config, &e, NOW, true).expect("digest runs");
+    let after = preview_digest(&config, &e, NOW).expect("preview again");
+    assert!(after.already_exists, "today's digest now exists");
 }
 
 #[test]
