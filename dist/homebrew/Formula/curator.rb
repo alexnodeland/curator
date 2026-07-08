@@ -11,9 +11,9 @@ class Curator < Formula
   desc "Local-first knowledge plane: markdown vault + index + MCP for agents"
   homepage "https://github.com/alexnodeland/curator"
   url "https://github.com/alexnodeland/curator/archive/refs/tags/v0.1.0.tar.gz"
-  # Filled from the v0.1.0 source tarball at publish time — see
-  # dist/homebrew/README.md. `brew fetch --build-from-source` prints it.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  # sha256 of the GitHub-generated source tarball for the `url` tag. Bump both
+  # per release — see dist/homebrew/README.md.
+  sha256 "7157c21b4558b57a0d75b1fd980985b5a864b83a2bad25fc636013da9d979512"
   license "MIT"
   head "https://github.com/alexnodeland/curator.git", branch: "main"
 
